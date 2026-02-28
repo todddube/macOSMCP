@@ -1,0 +1,21 @@
+[project]
+name = "macos-mcp"
+version = "0.1.0"
+description = "macOS Reminders MCP Server — Read-Only POC"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=2.0",
+]
+
+[project.scripts]
+reminders-mcp = "reminders_mcp:mcp.run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]

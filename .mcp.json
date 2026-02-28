@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "macos-reminders": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/todddube/Documents/Github/macOSMCP",
+        "run",
+        "reminders_mcp.py"
+      ]
+    }
+  }
+}
