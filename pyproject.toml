@@ -1,6 +1,6 @@
 [project]
 name = "mac-bridge"
-version = "0.3.0"
+version = "0.4.0"
 description = "mac-bridge — MCP server bridging Claude to macOS Reminders & Calendar (read-only), Mail coming soon"
 requires-python = ">=3.10"
 dependencies = [

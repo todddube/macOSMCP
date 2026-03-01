@@ -14,6 +14,9 @@
 - [x] **Typed return values** — all tools return TypedDicts (`models.py`). FastMCP auto-generates `outputSchema` and includes `structuredContent`. Removed `json.dumps()` from all tools.
 - [x] **Cache stable data** — `list_reminders` and `list_calendars` use a 30s TTL cache via `cached_result()`/`set_cached_result()` in `applescript.py`.
 - [x] **Annotated parameters** — all tool parameters use `Annotated[type, Field(ge=..., le=..., description="...")]` for schema generation and input validation.
+- [x] **Error handling with `ToolError`** — replaced all `return {"error": ...}` with `raise ToolError("message")` in reminders.py and calendar.py. FastMCP sets `isError: true` on the MCP result automatically, and the LLM can see the error and retry with different arguments. Removed unused `ErrorResult` TypedDict.
+- [x] **`on_duplicate="error"`** — added to `FastMCP()` constructor to catch accidental duplicate tool registrations at startup.
+- [x] **Test suite (78 tests)** — pytest suite covering sanitization, TSV parsing, TTL cache, tool registration (readOnlyHint, timeouts, schema constraints), and full tool flows with mocked subprocess. Run with `uv run pytest tests/ -v`.
 
 ### P2 — New Features
 
@@ -36,7 +39,6 @@
 ### P3 — Polish & Scale
 
 - [ ] **Async AppleScript execution** — replace `subprocess.run()` with `asyncio.create_subprocess_exec()` so blocking AppleScript calls don't stall the FastMCP event loop.
-- [ ] **Error handling with `ToolError`** — replace raw `json.dumps({"error": ...})` returns with `raise ToolError("message")`. FastMCP will set `isError: true` on the result automatically, and the LLM can see the error and retry with different arguments.
 - [ ] **Progress reporting** — for slow cross-list queries, use FastMCP's `Context.report_progress()` to show progress in clients that support it.
 - [ ] **File-based logging** — move logging to `~/Library/Logs/macOSMCP/` instead of stdout/stderr. Stdout output interferes with stdio transport. Use Python `logging.FileHandler` or FastMCP's `Context.log`.
 - [ ] **Swift/EventKit helper** — for Calendar specifically, a compiled Swift CLI using EventKit would return 100 events in <1 second vs 60+ seconds via AppleScript. Could be a drop-in replacement for `_build_events_script()`.
@@ -44,7 +46,7 @@
 
 ---
 
-## Current State (v0.3.0)
+## Current State (v0.4.0)
 
 ### What's Built
 
@@ -52,6 +54,7 @@
 |---|---|---|
 | Reminders | 6 tools (list, get, detail, search, overdue, upcoming) | Working, read-only |
 | Calendar | 4 tools (list, get_events, today, search) | Working, read-only |
+| Tests | 78 pytest tests (parsing, sanitization, registration, mocked integration) | Passing |
 | Mail | — | Not started |
 
 ### Architecture
@@ -61,16 +64,24 @@ Claude Code / Claude Desktop
         |
         |  MCP (stdio transport, JSON-RPC 2.0)
         v
-  server.py              (FastMCP 3.0.2 entry point)
+  server.py              (FastMCP 3.0.2 entry point, on_duplicate="error")
         |
   macos_mcp/
-    applescript.py       (osascript subprocess + timeout constants)
-    reminders.py         (6 tools — batch AppleScript property fetching)
-    calendar.py          (4 tools — per-item AppleScript iteration)
+    applescript.py       (osascript subprocess + timeout + TTL cache + sanitization)
+    models.py            (TypedDict return types → FastMCP outputSchema)
+    reminders.py         (6 tools — batch AppleScript, ToolError on failure)
+    calendar.py          (4 tools — per-item AppleScript, ToolError on failure)
         |
         |  subprocess -> osascript
         v
   macOS Reminders.app / Calendar.app   (AppleScript bridge -> EventKit)
+
+  tests/
+    test_applescript.py      (sanitization, cache, run_applescript)
+    test_parsing.py          (reminders + calendar TSV parsing)
+    test_tool_registration.py (10 tools, readOnlyHint, timeouts, schemas)
+    test_tools_mocked.py     (full tool flows with mocked subprocess)
+    test_server.py           (server config verification)
 ```
 
 ### Key Design Decisions
@@ -89,6 +100,13 @@ Claude Code / Claude Desktop
 1. **`id of rems` batch fetch crash** — `get_overdue_reminders` and `get_upcoming_reminders` crashed with error -1728 because `id` can't be batch-fetched from `whose`-filtered reminder lists on modern macOS. Fix: per-item `id of (item i of rems)`.
 2. **Calendar 60-90s timeouts** — the hidden "Scheduled Reminders" calendar was being scanned, adding thousands of reminder-derived events. Fix: `every calendar whose name is not "Scheduled Reminders"`.
 3. **`include_completed` removed** — parameter removed from `get_reminders` and `search_reminders`; `whose completed is false` is now hardcoded in all queries.
+
+### Changes in v0.4.0
+
+1. **`ToolError` for all error paths** — replaced `return {"error": ...}` with `raise ToolError(...)` in all 10 tools. FastMCP now sets `isError: true` on MCP responses, giving LLMs proper error context. Removed unused `ErrorResult` TypedDict from `models.py`.
+2. **`on_duplicate="error"`** — added to `FastMCP()` constructor to catch accidental duplicate tool registrations at startup.
+3. **Test suite (78 tests)** — added `tests/` directory with 5 test modules covering sanitization, TSV parsing, TTL cache, tool registration (readOnlyHint, timeouts, schema constraints), and full tool flows with mocked subprocess calls. Run: `uv run pytest tests/ -v`.
+4. **`.gitignore`** — added to exclude `__pycache__/`, `.venv/`, `.pytest_cache/`, etc.
 
 ---
 
