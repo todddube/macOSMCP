@@ -7,17 +7,28 @@ resolved with ~5 batch fetches regardless of size, then pure-AppleScript loops
 handle filtering — dramatically reducing latency for large lists.
 """
 
-import json
 import logging
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastmcp import FastMCP
+from pydantic import Field
 
 from .applescript import (
     TIMEOUT_CROSS_LIST,
     TIMEOUT_NORMAL,
+    cached_result,
     lines_from_applescript,
     sanitize_for_applescript,
+    set_cached_result,
+)
+from .models import (
+    ErrorResult,
+    OverdueRemindersResult,
+    ReminderDetailResult,
+    ReminderListsResult,
+    ReminderSearchResult,
+    RemindersResult,
+    UpcomingRemindersResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -289,13 +300,17 @@ end tell"""
 def register_tools(mcp: FastMCP) -> None:
     """Register all Reminders tools on the given FastMCP instance."""
 
-    @mcp.tool(annotations={"readOnlyHint": True})
-    def list_reminders() -> str:
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=60)
+    def list_reminders() -> ReminderListsResult | ErrorResult:
         """List all Reminder lists in macOS Reminders.
 
         Returns a JSON object:
             { "lists": [{"name": "Work", "count": 5}, ...], "count": N }
         """
+        hit = cached_result("list_reminders")
+        if hit is not None:
+            return hit
+
         script = """tell application "Reminders"
     set output to ""
     repeat with l in lists
@@ -308,17 +323,19 @@ end tell"""
         try:
             raw_lines = lines_from_applescript(script)
             items = [_parse_tsv_line(ln) for ln in raw_lines]
-            return json.dumps({"lists": items, "count": len(items)}, indent=2)
+            result = {"lists": items, "count": len(items)}
+            set_cached_result("list_reminders", result)
+            return result
         except RuntimeError as exc:
             logger.error("list_reminder_lists failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
     def get_reminders(
-        list_name: Optional[str] = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> str:
+        list_name: Annotated[Optional[str], Field(description="Name of a specific list to query. Omit for all lists.")] = None,
+        limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
+        offset: Annotated[int, Field(ge=0, description="Skip the first N results for pagination")] = 0,
+    ) -> RemindersResult | ErrorResult:
         """Fetch reminders from macOS Reminders.
 
         Completed reminders are always excluded.
@@ -343,10 +360,10 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=timeout)
         except RuntimeError as exc:
             logger.error("get_reminders failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return json.dumps({"error": raw_lines[0]})
+            return {"error": raw_lines[0]}
 
         reminders = []
         for ln in raw_lines:
@@ -355,18 +372,18 @@ end tell"""
                 obj["list"] = list_name
             reminders.append(obj)
 
-        return json.dumps(
-            {
-                "reminders": reminders,
-                "count": len(reminders),
-                "list": list_name or "all",
-                "offset": offset,
-            },
-            indent=2,
-        )
+        return {
+            "reminders": reminders,
+            "count": len(reminders),
+            "list": list_name or "all",
+            "offset": offset,
+        }
 
-    @mcp.tool(annotations={"readOnlyHint": True})
-    def get_reminder_detail(list_name: str, title: str) -> str:
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=60)
+    def get_reminder_detail(
+        list_name: Annotated[str, Field(description="The list containing the reminder")],
+        title: Annotated[str, Field(description="Title (name) of the reminder")],
+    ) -> ReminderDetailResult | ErrorResult:
         """Get full details of a reminder by list name and title.
 
         Args:
@@ -437,10 +454,10 @@ end tell"""
             raw_lines = lines_from_applescript(script)
         except RuntimeError as exc:
             logger.error("get_reminder_detail failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return json.dumps({"error": raw_lines[0]})
+            return {"error": raw_lines[0]}
 
         results = []
         for ln in raw_lines:
@@ -448,22 +465,19 @@ end tell"""
             obj["list"] = list_name
             results.append(obj)
 
-        return json.dumps(
-            {
-                "reminders": results,
-                "count": len(results),
-                "list": list_name,
-                "query_title": title,
-            },
-            indent=2,
-        )
+        return {
+            "reminders": results,
+            "count": len(results),
+            "list": list_name,
+            "query_title": title,
+        }
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
     def search_reminders(
-        query: str,
-        list_name: Optional[str] = None,
-        limit: int = 50,
-    ) -> str:
+        query: Annotated[str, Field(min_length=1, description="Text to find in reminder titles")],
+        list_name: Annotated[Optional[str], Field(description="Scope search to one list. Omit for all lists.")] = None,
+        limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
+    ) -> ReminderSearchResult | ErrorResult:
         """Search for reminders whose title contains the query string (case-insensitive).
 
         Completed reminders are always excluded.
@@ -476,7 +490,7 @@ end tell"""
         Returns a JSON object with matching reminder objects.
         """
         if not query or not query.strip():
-            return json.dumps({"error": "query must not be empty"})
+            return {"error": "query must not be empty"}
 
         safe_query = sanitize_for_applescript(query)
         safe_list = sanitize_for_applescript(list_name) if list_name else None
@@ -495,10 +509,10 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=timeout)
         except RuntimeError as exc:
             logger.error("search_reminders failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return json.dumps({"error": raw_lines[0]})
+            return {"error": raw_lines[0]}
 
         results = []
         for ln in raw_lines:
@@ -507,13 +521,12 @@ end tell"""
                 obj["list"] = list_name
             results.append(obj)
 
-        return json.dumps(
-            {"query": query, "results": results, "count": len(results)},
-            indent=2,
-        )
+        return {"query": query, "results": results, "count": len(results)}
 
-    @mcp.tool(annotations={"readOnlyHint": True})
-    def get_overdue_reminders(limit: int = 50) -> str:
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    def get_overdue_reminders(
+        limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
+    ) -> OverdueRemindersResult | ErrorResult:
         """Get all incomplete reminders with a due date in the past.
 
         Args:
@@ -560,13 +573,16 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=TIMEOUT_CROSS_LIST)
         except RuntimeError as exc:
             logger.error("get_overdue_reminders failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
         results = [_parse_tsv_line(ln) for ln in raw_lines]
-        return json.dumps({"reminders": results, "count": len(results)}, indent=2)
+        return {"reminders": results, "count": len(results)}
 
-    @mcp.tool(annotations={"readOnlyHint": True})
-    def get_upcoming_reminders(days: int = 7, limit: int = 50) -> str:
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    def get_upcoming_reminders(
+        days: Annotated[int, Field(ge=0, le=365, description="Number of days to look ahead")] = 7,
+        limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
+    ) -> UpcomingRemindersResult | ErrorResult:
         """Get incomplete reminders due within the next N days.
 
         Args:
@@ -615,9 +631,7 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=TIMEOUT_CROSS_LIST)
         except RuntimeError as exc:
             logger.error("get_upcoming_reminders failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
         results = [_parse_tsv_line(ln) for ln in raw_lines]
-        return json.dumps(
-            {"reminders": results, "count": len(results), "days": days}, indent=2
-        )
+        return {"reminders": results, "count": len(results), "days": days}

@@ -4,6 +4,8 @@ AppleScript execution helpers for macOS MCP.
 
 import logging
 import subprocess
+import time
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,31 @@ def sanitize_for_applescript(s: str) -> str:
     s = s.replace("\\", "\\\\")
     s = s.replace('"', '\\"')
     return s
+
+
+# ---------------------------------------------------------------------------
+# Simple TTL cache for stable data (list_reminders, list_calendars)
+# ---------------------------------------------------------------------------
+
+_cache: dict[str, tuple[float, Any]] = {}
+CACHE_TTL = 30  # seconds
+
+
+def cached_result(key: str, ttl: int = CACHE_TTL) -> Any | None:
+    """Return cached value if it exists and hasn't expired, else None."""
+    entry = _cache.get(key)
+    if entry is None:
+        return None
+    ts, value = entry
+    if time.monotonic() - ts > ttl:
+        del _cache[key]
+        return None
+    return value
+
+
+def set_cached_result(key: str, value: Any) -> None:
+    """Store a value in the cache with the current timestamp."""
+    _cache[key] = (time.monotonic(), value)
 
 
 def run_applescript(script: str, timeout: int = TIMEOUT_NORMAL) -> str:

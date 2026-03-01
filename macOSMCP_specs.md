@@ -10,30 +10,10 @@
 
 ### P1 — Quality & Performance
 
-- [ ] **Per-tool timeouts via FastMCP** — add `timeout=` to each `@mcp.tool()` decorator so FastMCP enforces limits even if the subprocess hangs:
-  ```python
-  @mcp.tool(timeout=60, annotations={"readOnlyHint": True})   # single-list
-  @mcp.tool(timeout=90, annotations={"readOnlyHint": True})   # cross-list
-  ```
-- [ ] **Typed return values** — replace `-> str` with Pydantic models or `TypedDict` so FastMCP auto-generates `outputSchema`. Clients can then validate responses programmatically.
-  ```python
-  class ReminderItem(TypedDict):
-      id: str
-      title: str
-      list: str
-      due: str | None
-      priority: str
-      completed: bool
-      body: str | None
-
-  class RemindersResult(TypedDict):
-      reminders: list[ReminderItem]
-      count: int
-      list: str
-      offset: int
-  ```
-- [ ] **Cache stable data** — `list_reminders` and `list_calendars` change rarely. Add a simple TTL cache (30–60s) to avoid re-running AppleScript on repeated calls within a conversation.
-- [ ] **Annotated parameters** — use `Annotated[int, Field(ge=1, le=200, description="...")]` for all tool parameters. FastMCP uses these for schema generation and input validation.
+- [x] **Per-tool timeouts via FastMCP** — 60s for bounded tools (`list_reminders`, `list_calendars`, `get_reminder_detail`), 90s for cross-list tools.
+- [x] **Typed return values** — all tools return TypedDicts (`models.py`). FastMCP auto-generates `outputSchema` and includes `structuredContent`. Removed `json.dumps()` from all tools.
+- [x] **Cache stable data** — `list_reminders` and `list_calendars` use a 30s TTL cache via `cached_result()`/`set_cached_result()` in `applescript.py`.
+- [x] **Annotated parameters** — all tool parameters use `Annotated[type, Field(ge=..., le=..., description="...")]` for schema generation and input validation.
 
 ### P2 — New Features
 

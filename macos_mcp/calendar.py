@@ -18,18 +18,27 @@ Key AppleScript differences from Reminders:
   - NO batch property fetching — Calendar.app does not support it
 """
 
-import json
 import logging
 from datetime import date, timedelta
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastmcp import FastMCP
+from pydantic import Field
 
 from .applescript import (
     TIMEOUT_CROSS_LIST,
     TIMEOUT_NORMAL,
+    cached_result,
     lines_from_applescript,
     sanitize_for_applescript,
+    set_cached_result,
+)
+from .models import (
+    CalendarEventsResult,
+    CalendarListResult,
+    CalendarSearchResult,
+    ErrorResult,
+    TodayEventsResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -184,13 +193,17 @@ end tell"""
 def register_tools(mcp: FastMCP) -> None:
     """Register all Calendar tools on the given FastMCP instance."""
 
-    @mcp.tool(annotations={"readOnlyHint": True})
-    def list_calendars() -> str:
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=60)
+    def list_calendars() -> CalendarListResult | ErrorResult:
         """List all calendars in macOS Calendar.
 
         Returns a JSON object:
             { "calendars": [{"name": "Work", "description": "..."}, ...], "count": N }
         """
+        hit = cached_result("list_calendars")
+        if hit is not None:
+            return hit
+
         script = """tell application "Calendar"
     try
         set total to count of calendars
@@ -213,20 +226,22 @@ end tell"""
         try:
             raw_lines = lines_from_applescript(script)
             if raw_lines and raw_lines[0].startswith("ERROR:"):
-                return json.dumps({"error": raw_lines[0]})
+                return {"error": raw_lines[0]}
             items = [_parse_calendar_tsv(ln) for ln in raw_lines]
-            return json.dumps({"calendars": items, "count": len(items)}, indent=2)
+            result = {"calendars": items, "count": len(items)}
+            set_cached_result("list_calendars", result)
+            return result
         except RuntimeError as exc:
             logger.error("list_calendars failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
     def get_calendar_events(
-        calendar_name: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        limit: int = 50,
-    ) -> str:
+        calendar_name: Annotated[Optional[str], Field(description="Name of a specific calendar. Omit for all calendars.")] = None,
+        start_date: Annotated[Optional[str], Field(description="Start of range as YYYY-MM-DD (default: today)")] = None,
+        end_date: Annotated[Optional[str], Field(description="End of range as YYYY-MM-DD (default: 7 days from today)")] = None,
+        limit: Annotated[int, Field(ge=1, le=200, description="Maximum events to return")] = 50,
+    ) -> CalendarEventsResult | ErrorResult:
         """Get events from macOS Calendar for a date range.
 
         Args:
@@ -267,25 +282,24 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=timeout)
         except RuntimeError as exc:
             logger.error("get_calendar_events failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return json.dumps({"error": raw_lines[0]})
+            return {"error": raw_lines[0]}
 
         events = [_parse_calendar_tsv(ln) for ln in raw_lines]
-        return json.dumps(
-            {
-                "events": events,
-                "count": len(events),
-                "start_date": start.isoformat(),
-                "end_date": end.isoformat(),
-                "calendar": calendar_name or "all",
-            },
-            indent=2,
-        )
+        return {
+            "events": events,
+            "count": len(events),
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "calendar": calendar_name or "all",
+        }
 
-    @mcp.tool(annotations={"readOnlyHint": True})
-    def get_today_events(calendar_name: Optional[str] = None) -> str:
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    def get_today_events(
+        calendar_name: Annotated[Optional[str], Field(description="Scope to one calendar. Omit for all calendars.")] = None,
+    ) -> TodayEventsResult | ErrorResult:
         """Get all Calendar events for today (including all-day and multi-day events).
 
         Args:
@@ -318,30 +332,27 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=timeout)
         except RuntimeError as exc:
             logger.error("get_today_events failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return json.dumps({"error": raw_lines[0]})
+            return {"error": raw_lines[0]}
 
         events = [_parse_calendar_tsv(ln) for ln in raw_lines]
-        return json.dumps(
-            {
-                "events": events,
-                "count": len(events),
-                "date": today.isoformat(),
-                "calendar": calendar_name or "all",
-            },
-            indent=2,
-        )
+        return {
+            "events": events,
+            "count": len(events),
+            "date": today.isoformat(),
+            "calendar": calendar_name or "all",
+        }
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
     def search_calendar_events(
-        query: str,
-        calendar_name: Optional[str] = None,
-        days_back: int = 30,
-        days_forward: int = 30,
-        limit: int = 50,
-    ) -> str:
+        query: Annotated[str, Field(min_length=1, description="Text to find in event titles")],
+        calendar_name: Annotated[Optional[str], Field(description="Scope to one calendar. Omit for all calendars.")] = None,
+        days_back: Annotated[int, Field(ge=0, le=365, description="Days before today to search")] = 30,
+        days_forward: Annotated[int, Field(ge=0, le=365, description="Days after today to search")] = 30,
+        limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
+    ) -> CalendarSearchResult | ErrorResult:
         """Search Calendar event titles within a date window (case-insensitive).
 
         Args:
@@ -355,7 +366,7 @@ end tell"""
         location (if set), and notes (if set).
         """
         if not query or not query.strip():
-            return json.dumps({"error": "query must not be empty"})
+            return {"error": "query must not be empty"}
 
         safe_query = sanitize_for_applescript(query)
         today = date.today()
@@ -383,20 +394,17 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=timeout)
         except RuntimeError as exc:
             logger.error("search_calendar_events failed: %s", exc)
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return json.dumps({"error": raw_lines[0]})
+            return {"error": raw_lines[0]}
 
         results = [_parse_calendar_tsv(ln) for ln in raw_lines]
-        return json.dumps(
-            {
-                "query": query,
-                "results": results,
-                "count": len(results),
-                "start_date": start.isoformat(),
-                "end_date": end.isoformat(),
-                "calendar": calendar_name or "all",
-            },
-            indent=2,
-        )
+        return {
+            "query": query,
+            "results": results,
+            "count": len(results),
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "calendar": calendar_name or "all",
+        }
