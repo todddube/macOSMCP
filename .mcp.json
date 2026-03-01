@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "macos-apps": {
+    "mac-bridge": {
       "command": "uv",
       "args": [
         "--directory",

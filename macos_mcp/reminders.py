@@ -13,7 +13,12 @@ from typing import Optional
 
 from fastmcp import FastMCP
 
-from .applescript import TIMEOUT_CROSS_LIST, TIMEOUT_NORMAL, lines_from_applescript
+from .applescript import (
+    TIMEOUT_CROSS_LIST,
+    TIMEOUT_NORMAL,
+    lines_from_applescript,
+    sanitize_for_applescript,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +76,7 @@ def _parse_tsv_line(line: str) -> dict:
 def _build_single_list_get_script(
     list_name: str, include_completed: bool, limit: int, offset: int
 ) -> str:
-    safe_list = list_name.replace('"', '\\"')
+    safe_list = sanitize_for_applescript(list_name)
     completed_clause = "" if include_completed else "whose completed is false"
     if include_completed:
         comp_fetch = "        set allComps to completed of rems"
@@ -284,8 +289,8 @@ end tell"""
 def register_tools(mcp: FastMCP) -> None:
     """Register all Reminders tools on the given FastMCP instance."""
 
-    @mcp.tool()
-    def list_reminder_lists() -> str:
+    @mcp.tool(annotations={"readOnlyHint": True})
+    def list_reminders() -> str:
         """List all Reminder lists in macOS Reminders.
 
         Returns a JSON object:
@@ -308,32 +313,30 @@ end tell"""
             logger.error("list_reminder_lists failed: %s", exc)
             return json.dumps({"error": str(exc)})
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True})
     def get_reminders(
         list_name: Optional[str] = None,
-        include_completed: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> str:
         """Fetch reminders from macOS Reminders.
 
+        Completed reminders are always excluded.
+
         Args:
-            list_name:         Name of a specific list to query.
-                               Omit (or pass None) to query all lists.
-            include_completed: Include already-completed reminders (default: False).
-            limit:             Maximum results to return (default: 50).
-            offset:            Skip the first N results for pagination (default: 0).
+            list_name: Name of a specific list to query.
+                       Omit (or pass None) to query all lists.
+            limit:     Maximum results to return (default: 50).
+            offset:    Skip the first N results for pagination (default: 0).
 
         Returns a JSON object with a ``reminders`` array containing id, list,
         title, due, priority, completed, and body fields.
         """
         if list_name:
-            script = _build_single_list_get_script(
-                list_name, include_completed, limit, offset
-            )
+            script = _build_single_list_get_script(list_name, False, limit, offset)
             timeout = TIMEOUT_NORMAL
         else:
-            script = _build_all_lists_get_script(include_completed, limit, offset)
+            script = _build_all_lists_get_script(False, limit, offset)
             timeout = TIMEOUT_CROSS_LIST
 
         try:
@@ -362,7 +365,7 @@ end tell"""
             indent=2,
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True})
     def get_reminder_detail(list_name: str, title: str) -> str:
         """Get full details of a reminder by list name and title.
 
@@ -374,8 +377,8 @@ end tell"""
         completed_date, due, remind_me_date, creation_date, modification_date,
         priority, url, recurrence, and body.
         """
-        safe_list = list_name.replace('"', '\\"')
-        safe_title = title.replace('"', '\\"')
+        safe_list = sanitize_for_applescript(list_name)
+        safe_title = sanitize_for_applescript(title)
         script = f"""tell application "Reminders"
     try
         set theList to list "{safe_list}"
@@ -455,29 +458,29 @@ end tell"""
             indent=2,
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True})
     def search_reminders(
         query: str,
         list_name: Optional[str] = None,
-        include_completed: bool = False,
         limit: int = 50,
     ) -> str:
         """Search for reminders whose title contains the query string (case-insensitive).
 
+        Completed reminders are always excluded.
+
         Args:
-            query:             Text to find in reminder titles.
-            list_name:         Scope search to one list (optional; all lists if omitted).
-            include_completed: Include completed reminders (default: False).
-            limit:             Maximum results to return (default: 50).
+            query:     Text to find in reminder titles.
+            list_name: Scope search to one list (optional; all lists if omitted).
+            limit:     Maximum results to return (default: 50).
 
         Returns a JSON object with matching reminder objects.
         """
         if not query or not query.strip():
             return json.dumps({"error": "query must not be empty"})
 
-        safe_query = query.replace('"', '\\"')
-        safe_list = list_name.replace('"', '\\"') if list_name else None
-        completed_clause = "" if include_completed else "whose completed is false"
+        safe_query = sanitize_for_applescript(query)
+        safe_list = sanitize_for_applescript(list_name) if list_name else None
+        completed_clause = "whose completed is false"
 
         if list_name:
             script = _build_single_list_search_script(
@@ -509,7 +512,7 @@ end tell"""
             indent=2,
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True})
     def get_overdue_reminders(limit: int = 50) -> str:
         """Get all incomplete reminders with a due date in the past.
 
@@ -527,7 +530,6 @@ end tell"""
         set rems to reminders of l whose completed is false
         set total to count of rems
         if total > 0 then
-            set allIds to id of rems
             set allNames to name of rems
             set allDates to due date of rems
             set allBodies to body of rems
@@ -535,7 +537,7 @@ end tell"""
             repeat with i from 1 to total
                 set rDate to item i of allDates
                 if rDate is not missing value and rDate < now then
-                    set rId to item i of allIds
+                    set rId to id of (item i of rems)
                     set rName to item i of allNames
                     set rBody to item i of allBodies
                     set rPri to item i of allPris
@@ -563,7 +565,7 @@ end tell"""
         results = [_parse_tsv_line(ln) for ln in raw_lines]
         return json.dumps({"reminders": results, "count": len(results)}, indent=2)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True})
     def get_upcoming_reminders(days: int = 7, limit: int = 50) -> str:
         """Get incomplete reminders due within the next N days.
 
@@ -583,7 +585,6 @@ end tell"""
         set rems to reminders of l whose completed is false
         set total to count of rems
         if total > 0 then
-            set allIds to id of rems
             set allNames to name of rems
             set allDates to due date of rems
             set allBodies to body of rems
@@ -591,7 +592,7 @@ end tell"""
             repeat with i from 1 to total
                 set rDate to item i of allDates
                 if rDate is not missing value and rDate >= now and rDate <= endDate then
-                    set rId to item i of allIds
+                    set rId to id of (item i of rems)
                     set rName to item i of allNames
                     set rBody to item i of allBodies
                     set rPri to item i of allPris

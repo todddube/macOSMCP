@@ -1,23 +1,36 @@
-# macOS Apps MCP
+# mac-bridge
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server that gives Claude read-only access to macOS Reminders. Built with Python + [`fastmcp`](https://gofastmcp.com) + `osascript` (AppleScript) — no native Swift bridge, no Node/Bun runtime, no third-party binaries.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server that bridges Claude to macOS native apps. Provides read-only access to Reminders and Calendar via Python + [`fastmcp`](https://gofastmcp.com) + `osascript` (AppleScript) — no native Swift bridge, no Node/Bun runtime, no third-party binaries.
 
-**Calendar and Mail support are planned for future releases.**
+**Mail support is planned for a future release.**
 
 ---
 
 ## Tools
 
+### Reminders
+
 | Tool | Description | Key Arguments |
 |---|---|---|
-| `list_reminder_lists` | All lists with item counts | — |
-| `get_reminders` | Fetch reminders from one or all lists | `list_name?`, `include_completed?`, `limit`, `offset` |
+| `list_reminders` | All Reminder lists with item counts | — |
+| `get_reminders` | Fetch reminders from one or all lists | `list_name?`, `limit`, `offset` |
 | `get_reminder_detail` | Full property set for a specific reminder | `list_name`, `title` |
-| `search_reminders` | Title search across all (or one) list | `query`, `list_name?`, `include_completed?`, `limit` |
+| `search_reminders` | Title search across all (or one) list | `query`, `list_name?`, `limit` |
 | `get_overdue_reminders` | Incomplete reminders past their due date | `limit` |
 | `get_upcoming_reminders` | Incomplete reminders due within N days | `days`, `limit` |
 
+### Calendar
+
+| Tool | Description | Key Arguments |
+|---|---|---|
+| `list_calendars` | All calendars with names and descriptions | — |
+| `get_calendar_events` | Events in a date range (all or one calendar) | `calendar_name?`, `start_date?`, `end_date?`, `limit` |
+| `get_today_events` | All events overlapping today | `calendar_name?` |
+| `search_calendar_events` | Title search within a rolling date window | `query`, `calendar_name?`, `days_back?`, `days_forward?`, `limit` |
+
 All tools return structured JSON. Only **read** operations are implemented.
+
+> **Note:** Completed reminders are always excluded from all queries. The "Scheduled Reminders" virtual calendar is always excluded from calendar queries to avoid scanning reminder-derived entries.
 
 ---
 
@@ -33,10 +46,11 @@ Claude Code / Claude Desktop
   macos_mcp/
     applescript.py       (osascript subprocess helper)
     reminders.py         (6 Reminders tools — batch AppleScript)
+    calendar.py          (4 Calendar tools  — batch AppleScript)
         │
         │  subprocess → osascript
         ▼
-  macOS Reminders.app    (AppleScript bridge)
+  macOS Reminders.app / Calendar.app   (AppleScript bridge)
         │
         ▼
   EventKit data
@@ -111,7 +125,7 @@ The project ships with `.mcp.json` which Claude Code picks up automatically from
 ```json
 {
   "mcpServers": {
-    "macos-apps": {
+    "mac-bridge": {
       "command": "uv",
       "args": [
         "--directory", "/your/path/to/macOSMCP",
@@ -128,7 +142,7 @@ Restart Claude Code after editing, then confirm the server loads:
 /mcp
 ```
 
-You should see `macos-apps` listed as connected.
+You should see `mac-bridge` listed as connected.
 
 ---
 
@@ -139,7 +153,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "macos-apps": {
+    "mac-bridge": {
       "command": "uv",
       "args": [
         "--directory", "/your/path/to/macOSMCP",
@@ -158,6 +172,7 @@ Restart Claude Desktop after saving.
 
 Once connected, try these in Claude:
 
+**Reminders**
 - *"What Reminders lists do I have and how many items are in each?"*
 - *"Show me all incomplete reminders in my Work list"*
 - *"Search my reminders for anything about dentist"*
@@ -165,17 +180,39 @@ Once connected, try these in Claude:
 - *"What's due in the next 7 days?"*
 - *"Give me full details on the reminder called 'Call insurance' in my DFD list"*
 
+**Calendar**
+- *"What calendars do I have?"*
+- *"What's on my calendar today?"*
+- *"Show me everything on my Work calendar for next week"*
+- *"Search my calendar for any events mentioning 'dentist' in the last 60 days"*
+- *"What do I have coming up between March 1 and March 15?"*
+
 ---
 
 ## macOS Permissions
 
-Reminders access is governed by **TCC (Transparency, Consent, and Control)**. The server requests access automatically on the first `osascript` call. If you accidentally denied it:
+Access is governed by **TCC (Transparency, Consent, and Control)**. Both Reminders and Calendar request permission automatically on the first `osascript` call — macOS will prompt you the first time. If you accidentally denied either app or need to re-enable:
 
 ```
-System Settings → Privacy & Security → Reminders
+System Settings → Privacy & Security → Reminders   (enable for Terminal)
+System Settings → Privacy & Security → Calendars   (enable for Terminal)
 ```
 
-Enable access for **Terminal** (or whichever app launched Claude Code/Desktop).
+> **Which app to enable for:** The permission must be granted to the process that runs the server — typically **Terminal.app**. If you launch Claude Desktop directly, grant it to **Claude** instead. If you use iTerm2 or another terminal, grant it to that app.
+
+### Testing permissions manually
+
+```bash
+# Verify Reminders access
+osascript -e 'tell application "Reminders" to return name of lists'
+
+# Verify Calendar access
+osascript -e 'tell application "Calendar" to return name of calendars'
+```
+
+Both should return a list of names. A permissions error will say `not authorized to send Apple events`.
+
+> **Note on Reminders in Calendar:** Reminders with due dates appear visually in Calendar.app under a "Scheduled Reminders" calendar. This calendar is **automatically excluded** from all calendar queries to avoid slow scans and duplicate data. To query Reminders (with full metadata like priority, body, list), use `get_reminders`, `get_upcoming_reminders`, or `get_overdue_reminders`.
 
 ---
 
@@ -187,7 +224,8 @@ macOSMCP/
 ├── macos_mcp/
 │   ├── __init__.py
 │   ├── applescript.py     ← osascript helper + timeout constants
-│   └── reminders.py       ← 6 Reminders tools (batch AppleScript)
+│   ├── reminders.py       ← 6 Reminders tools (batch AppleScript)
+│   └── calendar.py        ← 4 Calendar tools  (batch AppleScript)
 ├── pyproject.toml         ← uv/hatch project config
 ├── .mcp.json              ← Claude Code auto-discovery config
 └── macOSMCP_specs.md      ← design specs and implementation notes
@@ -221,10 +259,11 @@ macOSMCP/
 - [ ] `complete_reminder(title, list_name)`
 - [ ] `delete_reminder(title, list_name)`
 
-### Phase 3 — Calendar Integration
-- [ ] `list_calendars`
-- [ ] `get_today_events`
-- [ ] `get_events_range(start, end)`
+### Phase 3 — Calendar Integration ✓
+- [x] `list_calendars`
+- [x] `get_today_events`
+- [x] `get_calendar_events(start_date, end_date)`
+- [x] `search_calendar_events(query)`
 
 ### Phase 4 — Mail Integration
 - [ ] `get_unread_emails(mailbox?, count?)`

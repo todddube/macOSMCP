@@ -12,6 +12,22 @@ TIMEOUT_NORMAL = 60       # single-list or bounded operations
 TIMEOUT_CROSS_LIST = 90   # cross-list queries
 
 
+def sanitize_for_applescript(s: str) -> str:
+    """Escape a user-supplied string for safe embedding in AppleScript literals.
+
+    Prevents injection attacks by escaping characters that could break out of
+    a double-quoted AppleScript string context.  Handles backslashes, double
+    quotes, and strips null bytes / other control characters that could
+    interfere with osascript parsing.
+    """
+    # Strip null bytes and other ASCII control chars (keep tab/newline for bodies)
+    s = "".join(ch for ch in s if ch == "\t" or ch == "\n" or (ord(ch) >= 32))
+    # Escape backslashes first (so we don't double-escape), then double quotes
+    s = s.replace("\\", "\\\\")
+    s = s.replace('"', '\\"')
+    return s
+
+
 def run_applescript(script: str, timeout: int = TIMEOUT_NORMAL) -> str:
     """Execute an AppleScript snippet via osascript and return stdout.
 
