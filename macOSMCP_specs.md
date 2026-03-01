@@ -100,13 +100,14 @@ Per the [MCP specification (2025-11-25)](https://modelcontextprotocol.io/specifi
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Validate all tool inputs | Partial | Types checked by FastMCP; **AppleScript injection not yet sanitized** |
+| Validate all tool inputs | Done | Types checked by FastMCP; `Annotated[..., Field(...)]` with constraints; AppleScript injection sanitized via `sanitize_for_applescript()` |
 | Proper access controls | Done | Read-only tools, stdio transport limits access to MCP client |
 | Rate limit tool invocations | Not done | Low priority for local-only server |
 | Sanitize tool outputs | Done | TSV parser handles missing values, bad fields |
 | `tools` capability declared | Done | FastMCP handles automatically |
-| Tool `readOnlyHint` annotations | Not done | **Should add to all 10 tools** |
-| Structured `outputSchema` | Not done | **Should add typed return values** |
+| Tool `readOnlyHint` annotations | Done | All 10 tools have `annotations={"readOnlyHint": True}` |
+| Structured `outputSchema` | Done | All tools return TypedDicts (`models.py`); FastMCP auto-generates `outputSchema` |
+| `ToolError` for error signaling | Done | All tools `raise ToolError(...)` — FastMCP sets `isError: true` automatically |
 | Human-in-the-loop | Done | Client-side (Claude Desktop/Code handles approval) |
 
 ### FastMCP Best Practices
@@ -115,20 +116,20 @@ Per [FastMCP docs (gofastmcp.com)](https://gofastmcp.com/servers/tools):
 
 | Practice | Status | Notes |
 |---|---|---|
-| Type hints on all parameters | Partial | Has types but not `Annotated[..., Field(...)]` |
+| Type hints on all parameters | Done | All parameters use `Annotated[type, Field(ge=..., le=..., description="...")]` |
 | Docstrings for schema generation | Done | All tools have detailed docstrings |
-| `ToolError` for user-facing errors | Not done | Currently returns `{"error": "..."}` in JSON |
-| `@mcp.tool(timeout=N)` per tool | Not done | Relies on subprocess timeout only |
-| `on_duplicate_tools="error"` | Not done | Should add to `FastMCP()` constructor |
+| `ToolError` for user-facing errors | Done | All tools raise `ToolError`; FastMCP sets `isError: true` on MCP result |
+| `@mcp.tool(timeout=N)` per tool | Done | 60s for bounded tools, 90s for cross-list tools |
+| `on_duplicate="error"` | Done | Added to `FastMCP()` constructor to catch accidental duplicate registrations |
 | `async def` for I/O-bound tools | Not done | Sync functions run in threadpool (ok but not ideal) |
 | `Context` for logging/progress | Not done | Uses Python `logging` directly |
-| Return Pydantic models | Not done | Returns `str` (JSON) from all tools |
+| Return TypedDicts | Done | All tools return TypedDicts; FastMCP generates `outputSchema` and `structuredContent` |
 
 ### Security
 
 | Concern | Status | Action |
 |---|---|---|
-| AppleScript injection via string interpolation | **Vulnerable** | Sanitize `"`, `\`, and control chars in all user inputs |
+| AppleScript injection via string interpolation | Done | `sanitize_for_applescript()` escapes `\`, `"`, strips control chars on all user inputs |
 | Subprocess command injection | Safe | Only calls `osascript -e`; no shell=True |
 | File system access | Safe | No file operations |
 | Network access | Safe | No network calls |

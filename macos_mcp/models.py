@@ -115,10 +115,3 @@ class CalendarSearchResult(TypedDict):
     calendar: str
 
 
-# ---------------------------------------------------------------------------
-# Error
-# ---------------------------------------------------------------------------
-
-
-class ErrorResult(TypedDict):
-    error: str

@@ -11,6 +11,7 @@ import logging
 from typing import Annotated, Optional
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from .applescript import (
@@ -22,7 +23,6 @@ from .applescript import (
     set_cached_result,
 )
 from .models import (
-    ErrorResult,
     OverdueRemindersResult,
     ReminderDetailResult,
     ReminderListsResult,
@@ -301,7 +301,7 @@ def register_tools(mcp: FastMCP) -> None:
     """Register all Reminders tools on the given FastMCP instance."""
 
     @mcp.tool(annotations={"readOnlyHint": True}, timeout=60)
-    def list_reminders() -> ReminderListsResult | ErrorResult:
+    def list_reminders() -> ReminderListsResult:
         """List all Reminder lists in macOS Reminders.
 
         Returns a JSON object:
@@ -328,14 +328,14 @@ end tell"""
             return result
         except RuntimeError as exc:
             logger.error("list_reminder_lists failed: %s", exc)
-            return {"error": str(exc)}
+            raise ToolError(str(exc)) from exc
 
     @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
     def get_reminders(
         list_name: Annotated[Optional[str], Field(description="Name of a specific list to query. Omit for all lists.")] = None,
         limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
         offset: Annotated[int, Field(ge=0, description="Skip the first N results for pagination")] = 0,
-    ) -> RemindersResult | ErrorResult:
+    ) -> RemindersResult:
         """Fetch reminders from macOS Reminders.
 
         Completed reminders are always excluded.
@@ -360,10 +360,10 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=timeout)
         except RuntimeError as exc:
             logger.error("get_reminders failed: %s", exc)
-            return {"error": str(exc)}
+            raise ToolError(str(exc)) from exc
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return {"error": raw_lines[0]}
+            raise ToolError(raw_lines[0])
 
         reminders = []
         for ln in raw_lines:
@@ -383,7 +383,7 @@ end tell"""
     def get_reminder_detail(
         list_name: Annotated[str, Field(description="The list containing the reminder")],
         title: Annotated[str, Field(description="Title (name) of the reminder")],
-    ) -> ReminderDetailResult | ErrorResult:
+    ) -> ReminderDetailResult:
         """Get full details of a reminder by list name and title.
 
         Args:
@@ -454,10 +454,10 @@ end tell"""
             raw_lines = lines_from_applescript(script)
         except RuntimeError as exc:
             logger.error("get_reminder_detail failed: %s", exc)
-            return {"error": str(exc)}
+            raise ToolError(str(exc)) from exc
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return {"error": raw_lines[0]}
+            raise ToolError(raw_lines[0])
 
         results = []
         for ln in raw_lines:
@@ -477,7 +477,7 @@ end tell"""
         query: Annotated[str, Field(min_length=1, description="Text to find in reminder titles")],
         list_name: Annotated[Optional[str], Field(description="Scope search to one list. Omit for all lists.")] = None,
         limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
-    ) -> ReminderSearchResult | ErrorResult:
+    ) -> ReminderSearchResult:
         """Search for reminders whose title contains the query string (case-insensitive).
 
         Completed reminders are always excluded.
@@ -490,7 +490,7 @@ end tell"""
         Returns a JSON object with matching reminder objects.
         """
         if not query or not query.strip():
-            return {"error": "query must not be empty"}
+            raise ToolError("query must not be empty")
 
         safe_query = sanitize_for_applescript(query)
         safe_list = sanitize_for_applescript(list_name) if list_name else None
@@ -509,10 +509,10 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=timeout)
         except RuntimeError as exc:
             logger.error("search_reminders failed: %s", exc)
-            return {"error": str(exc)}
+            raise ToolError(str(exc)) from exc
 
         if raw_lines and raw_lines[0].startswith("ERROR:"):
-            return {"error": raw_lines[0]}
+            raise ToolError(raw_lines[0])
 
         results = []
         for ln in raw_lines:
@@ -526,7 +526,7 @@ end tell"""
     @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
     def get_overdue_reminders(
         limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
-    ) -> OverdueRemindersResult | ErrorResult:
+    ) -> OverdueRemindersResult:
         """Get all incomplete reminders with a due date in the past.
 
         Args:
@@ -573,7 +573,7 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=TIMEOUT_CROSS_LIST)
         except RuntimeError as exc:
             logger.error("get_overdue_reminders failed: %s", exc)
-            return {"error": str(exc)}
+            raise ToolError(str(exc)) from exc
 
         results = [_parse_tsv_line(ln) for ln in raw_lines]
         return {"reminders": results, "count": len(results)}
@@ -582,7 +582,7 @@ end tell"""
     def get_upcoming_reminders(
         days: Annotated[int, Field(ge=0, le=365, description="Number of days to look ahead")] = 7,
         limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
-    ) -> UpcomingRemindersResult | ErrorResult:
+    ) -> UpcomingRemindersResult:
         """Get incomplete reminders due within the next N days.
 
         Args:
@@ -631,7 +631,7 @@ end tell"""
             raw_lines = lines_from_applescript(script, timeout=TIMEOUT_CROSS_LIST)
         except RuntimeError as exc:
             logger.error("get_upcoming_reminders failed: %s", exc)
-            return {"error": str(exc)}
+            raise ToolError(str(exc)) from exc
 
         results = [_parse_tsv_line(ln) for ln in raw_lines]
         return {"reminders": results, "count": len(results), "days": days}

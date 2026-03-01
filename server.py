@@ -30,6 +30,7 @@ mcp = FastMCP(
         "or get_upcoming_reminders for tasks; use get_calendar_events, "
         "get_today_events, or search_calendar_events for calendar entries."
     ),
+    on_duplicate="error",
 )
 
 register_reminder_tools(mcp)
