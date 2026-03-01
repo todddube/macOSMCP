@@ -5,3 +5,4 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+/macos_mcp/__pycache__
