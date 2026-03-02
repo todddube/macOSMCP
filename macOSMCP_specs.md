@@ -41,12 +41,12 @@
 - [ ] **Async AppleScript execution** — replace `subprocess.run()` with `asyncio.create_subprocess_exec()` so blocking AppleScript calls don't stall the FastMCP event loop.
 - [ ] **Progress reporting** — for slow cross-list queries, use FastMCP's `Context.report_progress()` to show progress in clients that support it.
 - [ ] **File-based logging** — move logging to `~/Library/Logs/macOSMCP/` instead of stdout/stderr. Stdout output interferes with stdio transport. Use Python `logging.FileHandler` or FastMCP's `Context.log`.
-- [ ] **Swift/EventKit helper** — for Calendar specifically, a compiled Swift CLI using EventKit would return 100 events in <1 second vs 60+ seconds via AppleScript. Could be a drop-in replacement for `_build_events_script()`.
+- [x] **Swift/EventKit helper** — compiled Swift CLI (`swift/calendar_helper`) using EventKit's `predicateForEvents(withStart:end:calendars:)` for O(log N) indexed date queries. Replaces AppleScript's `whose` clause (O(N) linear scan) for `get_calendar_events`, `get_today_events`, and `search_calendar_events`. Reduces calendar queries from ~45s to <1s on calendars with thousands of historical events. Build: `bash swift/build.sh`.
 - [ ] **`search_tools` meta-tool** — when tool count exceeds ~15, add a tool that lets the LLM discover tools on-demand rather than loading all definitions upfront (Anthropic-recommended pattern for scale).
 
 ---
 
-## Current State (v0.4.0)
+## Current State (v0.5.0)
 
 ### What's Built
 
@@ -70,11 +70,16 @@ Claude Code / Claude Desktop
     applescript.py       (osascript subprocess + timeout + TTL cache + sanitization)
     models.py            (TypedDict return types → FastMCP outputSchema)
     reminders.py         (6 tools — batch AppleScript, ToolError on failure)
-    calendar.py          (4 tools — per-item AppleScript, ToolError on failure)
+    calendar.py          (4 tools — Swift/EventKit for events, AppleScript for list)
         |
-        |  subprocess -> osascript
+        ├── subprocess -> swift/calendar_helper (EventKit, indexed queries, <1s)
+        └── subprocess -> osascript (Reminders + list_calendars only)
         v
-  macOS Reminders.app / Calendar.app   (AppleScript bridge -> EventKit)
+  macOS Reminders.app / Calendar.app
+
+  swift/
+    calendar_helper.swift  (EventKit CLI — fast date-range event queries)
+    build.sh               (compile script: swiftc → swift/calendar_helper)
 
   tests/
     test_applescript.py      (sanitization, cache, run_applescript)
@@ -107,6 +112,12 @@ Claude Code / Claude Desktop
 2. **`on_duplicate="error"`** — added to `FastMCP()` constructor to catch accidental duplicate tool registrations at startup.
 3. **Test suite (78 tests)** — added `tests/` directory with 5 test modules covering sanitization, TSV parsing, TTL cache, tool registration (readOnlyHint, timeouts, schema constraints), and full tool flows with mocked subprocess calls. Run: `uv run pytest tests/ -v`.
 4. **`.gitignore`** — added to exclude `__pycache__/`, `.venv/`, `.pytest_cache/`, etc.
+
+### Changes in v0.5.0
+
+1. **Swift/EventKit helper for calendar queries** — replaced AppleScript's `whose` date filter (O(N) linear scan, ~45s on calendars with 3,000+ events) with a compiled Swift CLI using EventKit's `predicateForEvents` (O(log N) indexed, <1s). Affects `get_calendar_events`, `get_today_events`, `search_calendar_events`. `list_calendars` remains AppleScript (fast for metadata). Build: `bash swift/build.sh`.
+2. **Reduced calendar tool timeouts** — from 90s to 30s since EventKit queries complete in <1s.
+3. **Test suite expanded to 81 tests** — added Swift helper mock tests, calendar scoping tests, and search argument verification.
 
 ---
 

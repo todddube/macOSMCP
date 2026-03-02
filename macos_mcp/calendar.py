@@ -1,25 +1,24 @@
 """
 macOS Calendar tools for the macOS Apps MCP server.
 
-IMPORTANT: Calendar.app does NOT support batch property fetching on events
-(unlike Reminders.app). Accessing ``summary of evts`` where evts is a list
-raises "Can't get summary of {event id ...}". All event properties must be
-accessed per-item inside a ``repeat with evt in evts`` loop.
+Event queries (get_calendar_events, get_today_events, search_calendar_events)
+use a compiled Swift/EventKit helper for fast date-range lookups.  EventKit's
+``predicateForEvents(withStart:end:calendars:)`` uses indexed date queries
+(O(log N)) instead of AppleScript's ``whose`` clause which does a linear
+scan over every historical event (O(N)).  On calendars with thousands of
+events this reduces query time from ~45 seconds to <1 second.
 
-Date range queries use the Calendar app's native ``whose`` clause, which is
-efficient because EventKit maintains date indexes. With date filtering the
-result set is small enough that per-item iteration is fast in practice.
+list_calendars still uses AppleScript (fast for metadata-only queries).
 
-Key AppleScript differences from Reminders:
-  - Event title is ``summary``, NOT ``name``
-  - ``allday event`` is a two-word property (with space)
-  - ``description`` is the notes field (may contain newlines → escaped to " | ")
-  - Dates are constructed with property assignment (locale-independent)
-  - NO batch property fetching — Calendar.app does not support it
+The Swift binary is at ``swift/calendar_helper`` relative to the project root.
+Build it with: ``bash swift/build.sh``
 """
 
 import logging
+import os
+import subprocess
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Annotated, Optional
 
 from fastmcp import FastMCP
@@ -27,11 +26,9 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from .applescript import (
-    TIMEOUT_CROSS_LIST,
     TIMEOUT_NORMAL,
     cached_result,
     lines_from_applescript,
-    sanitize_for_applescript,
     set_cached_result,
 )
 from .models import (
@@ -43,26 +40,21 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Swift helper binary path
+# ---------------------------------------------------------------------------
+
+_SWIFT_BINARY = Path(__file__).resolve().parent.parent / "swift" / "calendar_helper"
+
+
+def _swift_helper_available() -> bool:
+    """Return True if the compiled Swift calendar_helper binary exists."""
+    return _SWIFT_BINARY.is_file() and os.access(_SWIFT_BINARY, os.X_OK)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _date_setup(var: str, d: date, *, end_of_day: bool = False) -> str:
-    """Return AppleScript statements that set ``var`` to the given date.
-
-    Uses property assignment rather than the locale-dependent ``date "..."``
-    literal so the script works regardless of system locale.
-    """
-    t = 86399 if end_of_day else 0
-    return (
-        f"        set {var} to current date\n"
-        f"        set year of {var} to {d.year}\n"
-        f"        set month of {var} to {d.month}\n"
-        f"        set day of {var} to {d.day}\n"
-        f"        set time of {var} to {t}"
-    )
 
 
 def _parse_date_param(value: Optional[str], default: date) -> date:
@@ -104,85 +96,46 @@ def _parse_calendar_tsv(line: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Shared AppleScript: event loop body (per-item, not batch)
+# Swift EventKit helper
 # ---------------------------------------------------------------------------
-# Inserted inside: repeat with evt in evts ... end repeat
-# Requires: calName, output, hitCount already set in outer scope.
-# extra_cond: if non-empty, wraps the output block in `if <cond> then ... end if`
 
-def _build_events_script(
-    calendar_filter: str,
-    date_setup: str,
-    extra_cond: str,
-    limit: int,
-) -> str:
-    """Build the full AppleScript for event queries.
+SWIFT_TIMEOUT = 30  # seconds — EventKit queries are fast (<1s typically)
 
-    Args:
-        calendar_filter: Sets ``calList`` to the target calendar(s).
-        date_setup:      Sets ``startDate`` and ``endDate``.
-        extra_cond:      Optional AppleScript boolean expression used as
-                         ``if <extra_cond> then`` to filter events in the loop
-                         (empty string = no extra filter). The expression may
-                         reference ``eTitle`` which is set before the test.
-        limit:           Hard cap on total events returned.
+
+def _run_swift_helper(
+    start: date,
+    end: date,
+    calendar_name: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 200,
+) -> list[str]:
+    """Run the Swift calendar_helper binary and return output lines.
+
+    Raises RuntimeError on non-zero exit or timeout.
     """
-    # Per-item event output block
-    event_output = f"""\
-                set eTitle to summary of evt
-                set eStart to start date of evt
-                set eEnd to end date of evt
-                set eAllday to allday event of evt
-                set eLoc to location of evt
-                set eDesc to description of evt
-                set eLine to "cal=" & calName & tab & "title=" & eTitle
-                set eLine to eLine & tab & "start=" & (eStart as string)
-                set eLine to eLine & tab & "end=" & (eEnd as string)
-                set eLine to eLine & tab & "allday=" & eAllday
-                if eLoc is not missing value and eLoc is not "" then
-                    set eLine to eLine & tab & "location=" & eLoc
-                end if
-                if eDesc is not missing value and eDesc is not "" then
-                    set origDelim to AppleScript's text item delimiters
-                    set AppleScript's text item delimiters to linefeed
-                    set descParts to text items of eDesc
-                    set AppleScript's text item delimiters to " | "
-                    set eDescClean to descParts as text
-                    set AppleScript's text item delimiters to origDelim
-                    set eLine to eLine & tab & "notes=" & eDescClean
-                end if
-                set output to output & eLine & linefeed
-                set hitCount to hitCount + 1
-                if hitCount >= {limit} then return output"""
+    cmd = [
+        str(_SWIFT_BINARY),
+        "--start", start.isoformat(),
+        "--end", end.isoformat(),
+        "--limit", str(limit),
+    ]
+    if calendar_name:
+        cmd.extend(["--calendar", calendar_name])
+    if search:
+        cmd.extend(["--search", search])
 
-    if extra_cond:
-        # For search: read title first, test it, then emit full output
-        loop_body = f"""\
-                set eTitle to summary of evt
-                if {extra_cond} then
-{event_output.replace('                set eTitle to summary of evt', '                -- eTitle already set above')}
-                end if"""
-    else:
-        loop_body = event_output
-
-    return f"""tell application "Calendar"
-    try
-{date_setup}
-        {calendar_filter}
-        set output to ""
-        set hitCount to 0
-        repeat with c in calList
-            set calName to name of c
-            set evts to (every event of c whose start date <= endDate and end date >= startDate)
-            repeat with evt in evts
-{loop_body}
-            end repeat
-        end repeat
-        return output
-    on error errMsg
-        return "ERROR:" & errMsg
-    end try
-end tell"""
+    logger.debug("Swift helper: %s", " ".join(cmd))
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=SWIFT_TIMEOUT,
+    )
+    if result.returncode != 0:
+        err = result.stderr.strip()
+        raise RuntimeError(err or "calendar_helper returned non-zero exit")
+    raw = result.stdout.strip()
+    return [ln.strip() for ln in raw.splitlines() if ln.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +190,7 @@ end tell"""
             logger.error("list_calendars failed: %s", exc)
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=30)
     def get_calendar_events(
         calendar_name: Annotated[Optional[str], Field(description="Name of a specific calendar. Omit for all calendars.")] = None,
         start_date: Annotated[Optional[str], Field(description="Start of range as YYYY-MM-DD (default: today)")] = None,
@@ -264,25 +217,9 @@ end tell"""
         start = _parse_date_param(start_date, today)
         end = _parse_date_param(end_date, today + timedelta(days=7))
 
-        date_setup = (
-            _date_setup("startDate", start)
-            + "\n"
-            + _date_setup("endDate", end, end_of_day=True)
-        )
-
-        if calendar_name:
-            safe_cal = sanitize_for_applescript(calendar_name)
-            cal_filter = f'set calList to {{calendar "{safe_cal}"}}'
-            timeout = TIMEOUT_NORMAL
-        else:
-            cal_filter = 'set calList to (every calendar whose name is not "Scheduled Reminders")'
-            timeout = TIMEOUT_CROSS_LIST
-
-        script = _build_events_script(cal_filter, date_setup, "", limit)
-
         try:
-            raw_lines = lines_from_applescript(script, timeout=timeout)
-        except RuntimeError as exc:
+            raw_lines = _run_swift_helper(start, end, calendar_name=calendar_name, limit=limit)
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
             logger.error("get_calendar_events failed: %s", exc)
             raise ToolError(str(exc)) from exc
 
@@ -298,7 +235,7 @@ end tell"""
             "calendar": calendar_name or "all",
         }
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=30)
     def get_today_events(
         calendar_name: Annotated[Optional[str], Field(description="Scope to one calendar. Omit for all calendars.")] = None,
     ) -> TodayEventsResult:
@@ -314,25 +251,10 @@ end tell"""
         or get_reminders (completed reminders are always excluded).
         """
         today = date.today()
-        date_setup = (
-            _date_setup("startDate", today)
-            + "\n"
-            + _date_setup("endDate", today, end_of_day=True)
-        )
-
-        if calendar_name:
-            safe_cal = sanitize_for_applescript(calendar_name)
-            cal_filter = f'set calList to {{calendar "{safe_cal}"}}'
-            timeout = TIMEOUT_NORMAL
-        else:
-            cal_filter = 'set calList to (every calendar whose name is not "Scheduled Reminders")'
-            timeout = TIMEOUT_CROSS_LIST
-
-        script = _build_events_script(cal_filter, date_setup, "", 200)
 
         try:
-            raw_lines = lines_from_applescript(script, timeout=timeout)
-        except RuntimeError as exc:
+            raw_lines = _run_swift_helper(today, today, calendar_name=calendar_name, limit=200)
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
             logger.error("get_today_events failed: %s", exc)
             raise ToolError(str(exc)) from exc
 
@@ -347,7 +269,7 @@ end tell"""
             "calendar": calendar_name or "all",
         }
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    @mcp.tool(annotations={"readOnlyHint": True}, timeout=30)
     def search_calendar_events(
         query: Annotated[str, Field(min_length=1, description="Text to find in event titles")],
         calendar_name: Annotated[Optional[str], Field(description="Scope to one calendar. Omit for all calendars.")] = None,
@@ -370,31 +292,15 @@ end tell"""
         if not query or not query.strip():
             raise ToolError("query must not be empty")
 
-        safe_query = sanitize_for_applescript(query)
         today = date.today()
         start = today - timedelta(days=days_back)
         end = today + timedelta(days=days_forward)
 
-        date_setup = (
-            _date_setup("startDate", start)
-            + "\n"
-            + _date_setup("endDate", end, end_of_day=True)
-        )
-
-        if calendar_name:
-            safe_cal = sanitize_for_applescript(calendar_name)
-            cal_filter = f'set calList to {{calendar "{safe_cal}"}}'
-            timeout = TIMEOUT_NORMAL
-        else:
-            cal_filter = 'set calList to (every calendar whose name is not "Scheduled Reminders")'
-            timeout = TIMEOUT_CROSS_LIST
-
-        extra = f'eTitle contains "{safe_query}"'
-        script = _build_events_script(cal_filter, date_setup, extra, limit)
-
         try:
-            raw_lines = lines_from_applescript(script, timeout=timeout)
-        except RuntimeError as exc:
+            raw_lines = _run_swift_helper(
+                start, end, calendar_name=calendar_name, search=query, limit=limit
+            )
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
             logger.error("search_calendar_events failed: %s", exc)
             raise ToolError(str(exc)) from exc
 

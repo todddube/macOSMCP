@@ -1,6 +1,6 @@
-"""Integration tests for tool functions with mocked AppleScript subprocess calls.
+"""Integration tests for tool functions with mocked subprocess calls.
 
-These tests verify the full tool flow (parameter handling -> AppleScript generation ->
+These tests verify the full tool flow (parameter handling -> subprocess call ->
 output parsing -> structured return) without requiring macOS Reminders/Calendar access.
 """
 
@@ -21,15 +21,25 @@ from macos_mcp.reminders import register_tools as register_reminder_tools
 # ---------------------------------------------------------------------------
 
 
-def _mock_applescript(output: str, returncode: int = 0, stderr: str = ""):
-    """Create a mock for subprocess.run that returns the given AppleScript output."""
+def _mock_subprocess(target_module: str, output: str, returncode: int = 0, stderr: str = ""):
+    """Create a mock for subprocess.run in the given module."""
     class MockResult:
         def __init__(self):
             self.stdout = output
             self.returncode = returncode
             self.stderr = stderr
 
-    return patch("macos_mcp.applescript.subprocess.run", return_value=MockResult())
+    return patch(f"{target_module}.subprocess.run", return_value=MockResult())
+
+
+def _mock_applescript(output: str, returncode: int = 0, stderr: str = ""):
+    """Mock subprocess.run in the applescript module (for Reminders + list_calendars)."""
+    return _mock_subprocess("macos_mcp.applescript", output, returncode, stderr)
+
+
+def _mock_swift_helper(output: str, returncode: int = 0, stderr: str = ""):
+    """Mock subprocess.run in the calendar module (for Swift EventKit helper)."""
+    return _mock_subprocess("macos_mcp.calendar", output, returncode, stderr)
 
 
 @pytest.fixture()
@@ -214,7 +224,7 @@ class TestGetCalendarEvents:
             "cal=Work\ttitle=Meeting\tstart=2025-06-01 09:00\t"
             "end=2025-06-01 10:00\tallday=false\n"
         )
-        with _mock_applescript(output):
+        with _mock_swift_helper(output):
             result = tools["get_calendar_events"](
                 start_date="2025-06-01", end_date="2025-06-07"
             )
@@ -225,22 +235,37 @@ class TestGetCalendarEvents:
         assert result["end_date"] == "2025-06-07"
 
     def test_empty_result(self, tools):
-        with _mock_applescript(""):
+        with _mock_swift_helper(""):
             result = tools["get_calendar_events"]()
         assert result["count"] == 0
         assert result["calendar"] == "all"
+
+    def test_swift_error_raises(self, tools):
+        with _mock_swift_helper("", returncode=1, stderr="EventKit access denied"):
+            with pytest.raises(ToolError, match="EventKit access denied"):
+                tools["get_calendar_events"]()
+
+    def test_scoped_to_calendar(self, tools):
+        output = "cal=Work\ttitle=Standup\tstart=09:00\tend=09:15\tallday=false\n"
+        with _mock_swift_helper(output) as mock_run:
+            result = tools["get_calendar_events"](calendar_name="Work")
+        assert result["calendar"] == "Work"
+        # Verify --calendar flag was passed
+        call_args = mock_run.call_args[0][0]
+        assert "--calendar" in call_args
+        assert "Work" in call_args
 
 
 class TestGetTodayEvents:
     def test_returns_today(self, tools):
         output = "cal=Personal\ttitle=Lunch\tstart=12:00\tend=13:00\tallday=false\n"
-        with _mock_applescript(output):
+        with _mock_swift_helper(output):
             result = tools["get_today_events"]()
         assert result["count"] == 1
         assert result["calendar"] == "all"
 
     def test_scoped_to_calendar(self, tools):
-        with _mock_applescript(""):
+        with _mock_swift_helper(""):
             result = tools["get_today_events"](calendar_name="Work")
         assert result["calendar"] == "Work"
 
@@ -248,7 +273,7 @@ class TestGetTodayEvents:
 class TestSearchCalendarEvents:
     def test_returns_matching_events(self, tools):
         output = "cal=Work\ttitle=Team Standup\tstart=09:00\tend=09:15\tallday=false\n"
-        with _mock_applescript(output):
+        with _mock_swift_helper(output):
             result = tools["search_calendar_events"](query="standup")
         assert result["query"] == "standup"
         assert result["count"] == 1
@@ -258,8 +283,15 @@ class TestSearchCalendarEvents:
             tools["search_calendar_events"](query="  ")
 
     def test_custom_date_range(self, tools):
-        with _mock_applescript(""):
+        with _mock_swift_helper(""):
             result = tools["search_calendar_events"](
                 query="test", days_back=7, days_forward=7
             )
         assert result["count"] == 0
+
+    def test_search_passes_query_to_swift(self, tools):
+        with _mock_swift_helper("") as mock_run:
+            tools["search_calendar_events"](query="meeting")
+        call_args = mock_run.call_args[0][0]
+        assert "--search" in call_args
+        assert "meeting" in call_args
