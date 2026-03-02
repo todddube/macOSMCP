@@ -72,93 +72,77 @@ set allBodies to body  of rems
 
 ## Requirements
 
-- macOS 12 Monterey or later (AppleScript Reminders dictionary)
+- macOS 12 Monterey or later
 - Python 3.10+
-- [uv](https://docs.astral.sh/uv/) (fast Python package manager)
-- Xcode Command Line Tools (`xcode-select --install`) — needed to compile the Swift calendar helper
+- [uv](https://docs.astral.sh/uv/) — fast Python package manager
+- Xcode Command Line Tools — needed to compile the Swift calendar helper
 
 ---
 
-## Installation
+## Setup
 
-### 1. Clone the repository
+### 1. Install prerequisites
+
+```bash
+# Install uv (if not already installed)
+brew install uv
+
+# Install Xcode Command Line Tools (if not already installed)
+xcode-select --install
+```
+
+### 2. Clone and build
 
 ```bash
 git clone https://github.com/todddube/macOSMCP.git
 cd macOSMCP
-```
-
-### 2. Install uv (if not already installed)
-
-```bash
-brew install uv
-```
-
-### 3. Install dependencies
-
-```bash
 uv sync
-```
-
-### 4. Build the Swift calendar helper
-
-```bash
 bash swift/build.sh
 ```
 
-This compiles `swift/calendar_helper.swift` into a binary at `swift/calendar_helper`. The binary uses EventKit for fast calendar event queries.
+`uv sync` installs Python dependencies. `swift/build.sh` compiles the EventKit calendar helper binary.
 
-### 5. Verify the AppleScript bridge
+### 3. Verify the build
 
 ```bash
+# Run the test suite (81 tests, no macOS app access needed)
+uv run pytest tests/ -q
+
+# Verify Reminders access (macOS will prompt for permission — grant it)
 osascript -e 'tell application "Reminders" to return name of lists'
+
+# Verify Calendar access (macOS will prompt for permission — grant it)
+swift/calendar_helper --start 2025-01-01 --end 2025-01-02
 ```
 
-On first run, macOS will prompt for **Reminders access** — grant it.
-
-### 6. Start the server
+### 4. Quick smoke test
 
 ```bash
 uv run server.py
 ```
 
-The server communicates over stdio and waits for MCP messages. Press `Ctrl-C` to stop.
+The server starts on stdio and waits for MCP messages. Press `Ctrl-C` to stop. If it starts without errors, you're ready to connect a client.
 
 ---
 
-## Claude Code Integration
+## Connect to Claude Code (CLI / Terminal)
 
-The project ships with `.mcp.json` which Claude Code picks up automatically from the project directory.
+The project ships with `.mcp.json` which Claude Code picks up **automatically** when you open a session from the project directory.
 
-**Edit the `--directory` path** if your checkout is not at `/Users/todddube/Documents/Github/macOSMCP`:
-
-```json
-{
-  "mcpServers": {
-    "mac-bridge": {
-      "command": "uv",
-      "args": [
-        "--directory", "/your/path/to/macOSMCP",
-        "run", "server.py"
-      ]
-    }
-  }
-}
+```bash
+cd /path/to/macOSMCP
+claude
 ```
 
-Restart Claude Code after editing, then confirm the server loads:
+Confirm the server is connected:
 
 ```
 /mcp
 ```
 
-You should see `mac-bridge` listed as connected.
+You should see `mac-bridge` listed as connected with 10 tools.
 
----
-
-## Claude Desktop Integration
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**If your checkout is not at the default path**, edit `.mcp.json` and update the `--directory` value:
 
 ```json
 {
@@ -174,7 +158,44 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop after saving.
+> **Permissions note:** macOS grants Reminders and Calendar access to the **terminal app** running the server (Terminal.app, iTerm2, etc.). Grant access when prompted.
+
+---
+
+## Connect to Claude Desktop (GUI app)
+
+### 1. Add the server config
+
+Open (or create) `~/Library/Application Support/Claude/claude_desktop_config.json` and add:
+
+```json
+{
+  "mcpServers": {
+    "mac-bridge": {
+      "command": "uv",
+      "args": [
+        "--directory", "/your/path/to/macOSMCP",
+        "run", "server.py"
+      ]
+    }
+  }
+}
+```
+
+Replace `/your/path/to/macOSMCP` with the actual path to your clone.
+
+### 2. Restart Claude Desktop
+
+Quit and reopen Claude Desktop. The server will start automatically.
+
+### 3. Verify
+
+Open a new conversation and ask: *"What Reminders lists do I have?"*
+
+On first use, macOS will prompt for Reminders and Calendar access — grant both.
+
+> **Permissions note:** When running via Claude Desktop, macOS grants access to the **Claude** app (not Terminal). If you see permission errors, check:
+> `System Settings → Privacy & Security → Reminders` and `→ Calendars` — ensure **Claude** is enabled.
 
 ---
 
@@ -199,30 +220,34 @@ Once connected, try these in Claude:
 
 ---
 
-## macOS Permissions
+## Troubleshooting Permissions
 
-Access is governed by **TCC (Transparency, Consent, and Control)**. Reminders access is prompted on the first `osascript` call. Calendar access is prompted when the Swift helper first calls EventKit. If you accidentally denied either or need to re-enable:
+macOS uses TCC (Transparency, Consent, and Control) to gate access. If you denied a permission prompt or need to re-enable:
 
 ```
-System Settings → Privacy & Security → Reminders   (enable for Terminal)
-System Settings → Privacy & Security → Calendars   (enable for Terminal)
+System Settings → Privacy & Security → Reminders   (enable for your terminal or Claude)
+System Settings → Privacy & Security → Calendars   (enable for your terminal or Claude)
 ```
 
-> **Which app to enable for:** The permission must be granted to the process that runs the server — typically **Terminal.app**. If you launch Claude Desktop directly, grant it to **Claude** instead. If you use iTerm2 or another terminal, grant it to that app.
+| Client | Grant access to |
+|---|---|
+| Claude Code via Terminal.app | Terminal |
+| Claude Code via iTerm2 | iTerm2 |
+| Claude Desktop | Claude |
 
-### Testing permissions manually
+To test permissions manually:
 
 ```bash
-# Verify Reminders access
+# Reminders (AppleScript)
 osascript -e 'tell application "Reminders" to return name of lists'
 
-# Verify Calendar access
-osascript -e 'tell application "Calendar" to return name of calendars'
+# Calendar (EventKit via Swift helper)
+swift/calendar_helper --start 2025-01-01 --end 2025-01-02
 ```
 
-Both should return a list of names. A permissions error will say `not authorized to send Apple events`.
+A permissions error will say `not authorized to send Apple events` (Reminders) or `Calendar access not granted` (Calendar).
 
-> **Note on Reminders in Calendar:** Reminders with due dates appear visually in Calendar.app under a "Scheduled Reminders" calendar. This calendar is **automatically excluded** from all calendar queries to avoid slow scans and duplicate data. To query Reminders (with full metadata like priority, body, list), use `get_reminders`, `get_upcoming_reminders`, or `get_overdue_reminders`.
+> **Note:** Reminders with due dates appear in Calendar.app under "Scheduled Reminders". This calendar is **automatically excluded** from all queries to avoid slow scans and duplicate data. Use the Reminders tools for full reminder metadata.
 
 ---
 
