@@ -54,7 +54,7 @@
 |---|---|---|
 | Reminders | 6 tools (list, get, detail, search, overdue, upcoming) | Working, read-only |
 | Calendar | 4 tools (list, get_events, today, search) | Working, read-only |
-| Tests | 78 pytest tests (parsing, sanitization, registration, mocked integration) | Passing |
+| Tests | 81 pytest tests (parsing, sanitization, registration, mocked integration) | Passing |
 | Mail | — | Not started |
 
 ### Architecture
@@ -93,10 +93,10 @@ Claude Code / Claude Desktop
 
 | Decision | Rationale |
 |---|---|
-| Python + fastmcp + AppleScript | No Node/Bun/Swift deps; fully auditable scripts; easy to extend |
+| Python + fastmcp + AppleScript + Swift | No Node/Bun deps; auditable AppleScript for Reminders; Swift/EventKit for fast calendar queries |
 | Tab-separated `key=value` output | Reminder titles/notes can contain commas; `body=` always last for safe tab-rejoining |
 | Batch property fetching (Reminders) | 5 IPC calls per list vs N x M; handles 100+ item lists without timeout |
-| Per-item iteration (Calendar) | Calendar.app doesn't support batch property fetching on events |
+| Swift/EventKit for calendar events | EventKit's `predicateForEvents` is O(log N) indexed vs AppleScript's O(N) `whose` scan; <1s vs ~45s |
 | `whose completed is false` always | Completed reminders are excluded from all queries (user preference) |
 | Exclude "Scheduled Reminders" cal | Virtual calendar that mirrors all reminders; causes 60-90s timeouts |
 
@@ -148,7 +148,7 @@ Per [FastMCP docs (gofastmcp.com)](https://gofastmcp.com/servers/tools):
 | Type hints on all parameters | Done | All parameters use `Annotated[type, Field(ge=..., le=..., description="...")]` |
 | Docstrings for schema generation | Done | All tools have detailed docstrings |
 | `ToolError` for user-facing errors | Done | All tools raise `ToolError`; FastMCP sets `isError: true` on MCP result |
-| `@mcp.tool(timeout=N)` per tool | Done | 60s for bounded tools, 90s for cross-list tools |
+| `@mcp.tool(timeout=N)` per tool | Done | 60s for bounded tools, 30s for Swift-backed calendar event tools |
 | `on_duplicate="error"` | Done | Added to `FastMCP()` constructor to catch accidental duplicate registrations |
 | `async def` for I/O-bound tools | Not done | Sync functions run in threadpool (ok but not ideal) |
 | `Context` for logging/progress | Not done | Uses Python `logging` directly |
@@ -185,9 +185,9 @@ Per [FastMCP docs (gofastmcp.com)](https://gofastmcp.com/servers/tools):
 
 ### Competitive Advantages of mac-bridge
 
-- **No Node/Bun/Swift required** — pure Python, installs with `uv sync`
+- **No Node/Bun required** — Python + a small Swift helper, installs with `uv sync` + `bash swift/build.sh`
 - **Smallest dependency footprint** — just `fastmcp` (which pulls `pydantic`, `starlette`, etc.)
-- **Batch property fetching** — same performance insight that led FradSer to use compiled Swift
+- **Swift/EventKit for calendar queries** — same performance insight as FradSer, but only for calendar events; reminders stay pure AppleScript
 - **Structured JSON output** — every tool returns typed, parseable JSON
 - **Fully auditable** — every AppleScript is readable inline in Python source
 

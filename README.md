@@ -1,6 +1,6 @@
 # mac-bridge
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server that bridges Claude to macOS native apps. Provides read-only access to Reminders and Calendar via Python + [`fastmcp`](https://gofastmcp.com) + `osascript` (AppleScript) — no native Swift bridge, no Node/Bun runtime, no third-party binaries.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server that bridges Claude to macOS native apps. Provides read-only access to Reminders and Calendar via Python + [`fastmcp`](https://gofastmcp.com). Reminders use AppleScript (`osascript`); Calendar event queries use a compiled Swift/EventKit helper for fast indexed lookups (<1s vs ~45s with AppleScript on large calendars). No Node/Bun runtime required.
 
 **Mail support is planned for a future release.**
 
@@ -45,20 +45,19 @@ Claude Code / Claude Desktop
         │
   macos_mcp/
     applescript.py       (osascript subprocess helper)
-    reminders.py         (6 Reminders tools — batch AppleScript)
-    calendar.py          (4 Calendar tools  — batch AppleScript)
+    models.py            (TypedDict return types → outputSchema)
+    reminders.py         (6 tools — batch AppleScript)
+    calendar.py          (4 tools — Swift/EventKit for events, AppleScript for list)
         │
-        │  subprocess → osascript
+        ├── subprocess → swift/calendar_helper  (EventKit, indexed queries, <1s)
+        └── subprocess → osascript              (Reminders + list_calendars only)
         ▼
-  macOS Reminders.app / Calendar.app   (AppleScript bridge)
-        │
-        ▼
-  EventKit data
+  macOS Reminders.app / Calendar.app
 ```
 
-### Performance: Batch Property Fetching
+### Performance
 
-The server uses AppleScript batch property fetching to avoid the N × M IPC calls that cause timeouts on large lists. Each list is resolved with ~5 batch fetches regardless of item count, then pure-AppleScript loops handle filtering with zero additional round-trips:
+**Reminders — Batch Property Fetching:** The server uses AppleScript batch property fetching to avoid the N × M IPC calls that cause timeouts on large lists. Each list is resolved with ~5 batch fetches regardless of item count, then pure-AppleScript loops handle filtering with zero additional round-trips:
 
 ```applescript
 -- One IPC call per property — not one per item
@@ -67,6 +66,8 @@ set allDates  to due date of rems
 set allBodies to body  of rems
 ```
 
+**Calendar — Swift/EventKit:** Calendar event queries (`get_calendar_events`, `get_today_events`, `search_calendar_events`) use a compiled Swift CLI that calls EventKit's `predicateForEvents(withStart:end:calendars:)` for O(log N) indexed date lookups. This replaced AppleScript's `whose` clause which did O(N) linear scans over all historical events (~45s on calendars with 3,000+ events → <1s with EventKit). `list_calendars` still uses AppleScript (fast for metadata-only).
+
 ---
 
 ## Requirements
@@ -74,6 +75,7 @@ set allBodies to body  of rems
 - macOS 12 Monterey or later (AppleScript Reminders dictionary)
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) (fast Python package manager)
+- Xcode Command Line Tools (`xcode-select --install`) — needed to compile the Swift calendar helper
 
 ---
 
@@ -98,7 +100,15 @@ brew install uv
 uv sync
 ```
 
-### 4. Verify the AppleScript bridge
+### 4. Build the Swift calendar helper
+
+```bash
+bash swift/build.sh
+```
+
+This compiles `swift/calendar_helper.swift` into a binary at `swift/calendar_helper`. The binary uses EventKit for fast calendar event queries.
+
+### 5. Verify the AppleScript bridge
 
 ```bash
 osascript -e 'tell application "Reminders" to return name of lists'
@@ -106,7 +116,7 @@ osascript -e 'tell application "Reminders" to return name of lists'
 
 On first run, macOS will prompt for **Reminders access** — grant it.
 
-### 5. Start the server
+### 6. Start the server
 
 ```bash
 uv run server.py
@@ -191,7 +201,7 @@ Once connected, try these in Claude:
 
 ## macOS Permissions
 
-Access is governed by **TCC (Transparency, Consent, and Control)**. Both Reminders and Calendar request permission automatically on the first `osascript` call — macOS will prompt you the first time. If you accidentally denied either app or need to re-enable:
+Access is governed by **TCC (Transparency, Consent, and Control)**. Reminders access is prompted on the first `osascript` call. Calendar access is prompted when the Swift helper first calls EventKit. If you accidentally denied either or need to re-enable:
 
 ```
 System Settings → Privacy & Security → Reminders   (enable for Terminal)
@@ -223,10 +233,21 @@ macOSMCP/
 ├── server.py              ← MCP entry point
 ├── macos_mcp/
 │   ├── __init__.py
-│   ├── applescript.py     ← osascript helper + timeout constants
+│   ├── applescript.py     ← osascript helper + TTL cache + sanitization
+│   ├── models.py          ← TypedDict return types → FastMCP outputSchema
 │   ├── reminders.py       ← 6 Reminders tools (batch AppleScript)
-│   └── calendar.py        ← 4 Calendar tools  (batch AppleScript)
-├── pyproject.toml         ← uv/hatch project config
+│   └── calendar.py        ← 4 Calendar tools (Swift/EventKit + AppleScript)
+├── swift/
+│   ├── calendar_helper.swift  ← EventKit CLI for fast event queries
+│   └── build.sh               ← compile script (swiftc → swift/calendar_helper)
+├── tests/                 ← 81 pytest tests
+│   ├── conftest.py
+│   ├── test_applescript.py
+│   ├── test_parsing.py
+│   ├── test_tool_registration.py
+│   ├── test_tools_mocked.py
+│   └── test_server.py
+├── pyproject.toml         ← uv/hatch project config (v0.5.0)
 ├── .mcp.json              ← Claude Code auto-discovery config
 └── macOSMCP_specs.md      ← design specs and implementation notes
 ```
@@ -235,11 +256,12 @@ macOSMCP/
 
 ## Design Decisions
 
-**Why fastmcp + AppleScript instead of a pre-built server?**
+**Why fastmcp + AppleScript + Swift instead of a pre-built server?**
 - Full control over output shape (structured JSON)
 - No Bun/Node runtime dependency
-- Every AppleScript is readable in the source — fully auditable
-- Easy to extend with Calendar, Mail, and custom business logic
+- Reminders: every AppleScript is readable inline — fully auditable
+- Calendar: Swift/EventKit helper gives native indexed performance without a full Swift MCP framework
+- Easy to extend with Mail and custom business logic
 
 **Why `uv run` as the MCP command?**
 - `uv run` handles venv creation and activation in a single step
@@ -260,10 +282,10 @@ macOSMCP/
 - [ ] `delete_reminder(title, list_name)`
 
 ### Phase 3 — Calendar Integration ✓
-- [x] `list_calendars`
-- [x] `get_today_events`
-- [x] `get_calendar_events(start_date, end_date)`
-- [x] `search_calendar_events(query)`
+- [x] `list_calendars` (AppleScript)
+- [x] `get_today_events` (Swift/EventKit)
+- [x] `get_calendar_events(start_date, end_date)` (Swift/EventKit)
+- [x] `search_calendar_events(query)` (Swift/EventKit)
 
 ### Phase 4 — Mail Integration
 - [ ] `get_unread_emails(mailbox?, count?)`
