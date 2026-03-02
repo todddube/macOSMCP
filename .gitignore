@@ -8,3 +8,4 @@ build/
 /macos_mcp/__pycache__
 # Compiled Swift binary (built locally via swift/build.sh)
 swift/calendar_helper
+/macos_mcp/__pycache__
