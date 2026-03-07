@@ -317,6 +317,13 @@ macOSMCP/
 - [ ] `search_emails(query)`
 - [ ] `get_email_body(message_id)`
 
+### Phase 5 — Scheduled Daily Briefing Agent
+- [ ] Headless Python agent (`scheduled_agent.py`) runs via launchd at 7:00 AM
+- [ ] Fetches calendar events + reminders via FastMCP Client
+- [ ] Summarizes with a single Claude API call (Anthropic Python SDK)
+- [ ] Emails HTML briefing to configured recipient
+- [ ] See `AIAgentAutomate_Specs.md` for full design
+
 ---
 
 ## References
@@ -330,4 +337,4 @@ macOSMCP/
 
 ## License
 
-MIT © 2025 Todd Dube
+MIT © 2025-2026 Todd Dube

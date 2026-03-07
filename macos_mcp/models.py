@@ -115,3 +115,14 @@ class CalendarSearchResult(TypedDict):
     calendar: str
 
 
+# ---------------------------------------------------------------------------
+# Messaging
+# ---------------------------------------------------------------------------
+
+
+class SendMessageResult(TypedDict):
+    success: bool
+    recipient: str
+    message: str
+
+

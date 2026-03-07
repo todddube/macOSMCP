@@ -16,7 +16,7 @@ class TestServerConfig:
 
     def test_all_tools_registered(self):
         tools = asyncio.run(mcp.list_tools())
-        assert len(tools) == 10
+        assert len(tools) == 11
 
     def test_on_duplicate_error(self):
         assert mcp._on_duplicate == "error"

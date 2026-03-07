@@ -172,6 +172,27 @@ class TestGetOverdueReminders:
         assert result["reminders"][0]["title"] == "Overdue task"
         assert result["reminders"][0]["priority"] == "medium"
 
+    def test_ghost_skipped_lists_surface_warning(self, tools):
+        output = "__SKIPPED__\tlist=Inbox\n__SKIPPED__\tlist=Work\n"
+        with _mock_applescript(output):
+            result = tools["get_overdue_reminders"]()
+        assert result["count"] == 0
+        assert result["skipped_lists"] == ["Inbox", "Work"]
+        assert "iCloud sync issue" in result["warning"]
+
+    def test_partial_ghost_returns_data_and_warning(self, tools):
+        output = (
+            "list=Work\tid=1\ttitle=Overdue task\t"
+            "due=2024-01-01\tpriority=5\tcompleted=false\n"
+            "__SKIPPED__\tlist=Inbox\n"
+        )
+        with _mock_applescript(output):
+            result = tools["get_overdue_reminders"]()
+        assert result["count"] == 1
+        assert result["reminders"][0]["title"] == "Overdue task"
+        assert result["skipped_lists"] == ["Inbox"]
+        assert "iCloud sync issue" in result["warning"]
+
 
 class TestGetUpcomingReminders:
     def test_returns_upcoming(self, tools):
@@ -184,6 +205,70 @@ class TestGetUpcomingReminders:
         assert result["count"] == 1
         assert result["days"] == 30
         assert result["reminders"][0]["priority"] == "low"
+
+    def test_ghost_skipped_lists_surface_warning(self, tools):
+        output = "__SKIPPED__\tlist=TAD\n__SKIPPED__\tlist=DFD\n"
+        with _mock_applescript(output):
+            result = tools["get_upcoming_reminders"](days=7)
+        assert result["count"] == 0
+        assert result["skipped_lists"] == ["TAD", "DFD"]
+        assert "iCloud sync issue" in result["warning"]
+
+
+class TestGhostSkippedReminders:
+    """Test iCloud ghost reminder handling across all reminder tools."""
+
+    def test_get_reminders_all_lists_ghost(self, tools):
+        output = "__SKIPPED__\tlist=Inbox\n__SKIPPED__\tlist=Work\n"
+        with _mock_applescript(output):
+            result = tools["get_reminders"]()
+        assert result["count"] == 0
+        assert result["skipped_lists"] == ["Inbox", "Work"]
+        assert "iCloud sync issue" in result["warning"]
+        assert "2 list(s)" in result["warning"]
+
+    def test_get_reminders_single_list_ghost(self, tools):
+        output = "__SKIPPED__\tlist=Inbox\n"
+        with _mock_applescript(output):
+            result = tools["get_reminders"](list_name="Inbox")
+        assert result["count"] == 0
+        assert result["skipped_lists"] == ["Inbox"]
+
+    def test_get_reminder_detail_ghost(self, tools):
+        output = "__SKIPPED__\tlist=Work\n"
+        with _mock_applescript(output):
+            result = tools["get_reminder_detail"](list_name="Work", title="Call Bob")
+        assert result["count"] == 0
+        assert result["skipped_lists"] == ["Work"]
+        assert "iCloud sync issue" in result["warning"]
+
+    def test_search_reminders_ghost(self, tools):
+        output = "__SKIPPED__\tlist=Inbox\n__SKIPPED__\tlist=Home\n"
+        with _mock_applescript(output):
+            result = tools["search_reminders"](query="test")
+        assert result["count"] == 0
+        assert result["skipped_lists"] == ["Inbox", "Home"]
+
+    def test_no_warning_when_no_skips(self, tools):
+        output = "list=Work\tid=1\ttitle=Task1\tpriority=0\tcompleted=false\n"
+        with _mock_applescript(output):
+            result = tools["get_reminders"]()
+        assert "skipped_lists" not in result
+        assert "warning" not in result
+
+    def test_mixed_data_and_skips(self, tools):
+        output = (
+            "list=Work\tid=1\ttitle=Task1\tpriority=0\tcompleted=false\n"
+            "__SKIPPED__\tlist=Inbox\n"
+            "list=Home\tid=2\ttitle=Task2\tpriority=9\tcompleted=false\n"
+        )
+        with _mock_applescript(output):
+            result = tools["get_reminders"]()
+        assert result["count"] == 2
+        assert result["reminders"][0]["title"] == "Task1"
+        assert result["reminders"][1]["title"] == "Task2"
+        assert result["skipped_lists"] == ["Inbox"]
+        assert "1 list(s)" in result["warning"]
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@
   - `complete_reminder(title, list_name)` — mark with `destructiveHint: False`
   - `delete_reminder(title, list_name)` — mark with `destructiveHint: True`
   - Gate behind a config flag (default off) so the server stays read-only unless opted in.
+- [ ] **Scheduled daily briefing agent** — headless Python script (`scheduled_agent.py`) that runs via launchd, fetches calendar + reminders via FastMCP Client, summarizes with a single Claude API call (`anthropic` SDK), and emails an HTML briefing. See `AIAgentAutomate_Specs.md` for full design, implementation code, launchd plist, and security considerations.
 - [ ] **MCP Prompts** — structured templates for common workflows:
   - `daily_planner` — "What's on my calendar today + overdue/upcoming reminders?"
   - `weekly_review` — "Show me this week's events and any overdue items"
