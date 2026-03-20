@@ -1,4 +1,7 @@
-"""Tests for TSV parsing in reminders and calendar modules."""
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
+"""Tests for TSV parsing in mac-bridge reminders and calendar modules."""
 
 from macos_mcp.reminders import _parse_tsv_line
 from macos_mcp.calendar import _parse_calendar_tsv

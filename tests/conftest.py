@@ -1,4 +1,7 @@
-"""Shared fixtures for macOS MCP tests."""
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
+"""Shared fixtures for mac-bridge tests."""
 
 import pytest
 

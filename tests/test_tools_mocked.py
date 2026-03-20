@@ -1,4 +1,7 @@
-"""Integration tests for tool functions with mocked subprocess calls.
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
+"""Integration tests for mac-bridge tool functions with mocked subprocess calls.
 
 These tests verify the full tool flow (parameter handling -> subprocess call ->
 output parsing -> structured return) without requiring macOS Reminders/Calendar access.

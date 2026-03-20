@@ -1,7 +1,7 @@
 [project]
 name = "mac-bridge"
 version = "0.5.0"
-description = "mac-bridge — MCP server bridging Claude to macOS Reminders & Calendar (read-only), Mail coming soon"
+description = "mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage"
 requires-python = ">=3.10"
 dependencies = [
     "fastmcp>=2.0",
@@ -9,6 +9,11 @@ dependencies = [
 
 [project.scripts]
 mac-bridge = "server:mcp.run"
+
+[project.optional-dependencies]
+agent = [
+    "anthropic>=0.86.0",
+]
 
 [build-system]
 requires = ["hatchling"]

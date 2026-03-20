@@ -1,5 +1,8 @@
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
 """
-macOS Reminders tools for the macOS Apps MCP server.
+macOS Reminders tools for mac-bridge.
 
 All six tools use batch AppleScript property fetching to minimise IPC round-trips:
 instead of N × M osascript calls (one per item per property), each list is
@@ -50,33 +53,48 @@ _PRIORITY_MAP: dict[str, str] = {
 _SKIPPED_PREFIX = "__SKIPPED__"
 
 
-def _split_skipped_lines(raw_lines: list[str]) -> tuple[list[str], list[str]]:
+def _split_skipped_lines(raw_lines: list[str]) -> tuple[list[str], list[dict]]:
     """Separate data lines from __SKIPPED__ marker lines.
 
-    Returns (data_lines, skipped_list_names).
+    Returns (data_lines, skipped_info) where each skipped entry is a dict
+    with 'list', and optionally 'error' and 'errnum' keys.
     """
     data: list[str] = []
-    skipped: list[str] = []
+    skipped: list[dict] = []
     for ln in raw_lines:
         if ln.startswith(_SKIPPED_PREFIX):
-            # Extract list name from "__SKIPPED__\tlist=FooBar"
+            info: dict = {}
             for part in ln.split("\t"):
                 if part.startswith("list="):
-                    skipped.append(part[5:])
-                    break
+                    info["list"] = part[5:]
+                elif part.startswith("error="):
+                    info["error"] = part[6:]
+                elif part.startswith("errnum="):
+                    info["errnum"] = part[7:]
+            if info.get("list"):
+                skipped.append(info)
         else:
             data.append(ln)
     return data, skipped
 
 
-def _add_skipped_warning(result: dict, skipped: list[str]) -> dict:
+def _add_skipped_warning(result: dict, skipped: list[dict]) -> dict:
     """Add skipped_lists and warning to result if any lists were skipped."""
     if skipped:
-        result["skipped_lists"] = skipped
+        list_names = [s["list"] for s in skipped]
+        result["skipped_lists"] = list_names
+        # Build detail lines showing error per list
+        details = []
+        for s in skipped:
+            detail = s["list"]
+            if "error" in s:
+                detail += f": {s['error']}"
+                if "errnum" in s:
+                    detail += f" (error {s['errnum']})"
+            details.append(detail)
         result["warning"] = (
-            f"iCloud sync issue: {len(skipped)} list(s) returned ghost objects "
-            f"and were skipped ({', '.join(skipped)}). "
-            "Reminders in these lists exist but cannot be read until iCloud sync completes. "
+            f"iCloud sync issue: {len(skipped)} list(s) could not be read and were skipped. "
+            f"Details: {'; '.join(details)}. "
             "Try again in a few minutes."
         )
     return result
@@ -124,131 +142,23 @@ def _build_single_list_get_script(
 ) -> str:
     safe_list = sanitize_for_applescript(list_name)
     # include_completed is always False in the public API; hardcode filter
+    # Uses `repeat with r in` iteration (NOT indexed access) to avoid
+    # hanging on ghost reminder objects.  Filters completed manually.
     return f"""tell application "Reminders"
     try
-        set rems to reminders of list "{safe_list}" whose completed is false
-        set total to count of rems
-        if total is 0 then return ""
-        set startIdx to {offset} + 1
-        if startIdx > total then return ""
-        set endIdx to {offset} + {limit}
-        if endIdx > total then set endIdx to total
-        set output to ""
-        -- Batch property fetch; silently returns empty if reminders are iCloud ghost objects
-        try
-            set allIds to id of rems
-            set allNames to name of rems
-            set allDates to due date of rems
-            set allBodies to body of rems
-            set allPris to priority of rems
-            repeat with i from startIdx to endIdx
-                set rId to item i of allIds
-                set rName to item i of allNames
-                set rDate to item i of allDates
-                set rBody to item i of allBodies
-                set rPri to item i of allPris
-                set rLine to "id=" & rId & tab & "title=" & rName
-                if rDate is not missing value then
-                    set rLine to rLine & tab & "due=" & (rDate as string)
-                end if
-                set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
-                if rBody is not missing value and rBody is not "" then
-                    set rLine to rLine & tab & "body=" & rBody
-                end if
-                set output to output & rLine & linefeed
-            end repeat
-        on error
-            -- Reminders are iCloud ghost objects (not yet synced)
-            set output to "__SKIPPED__" & tab & "list=" & "{safe_list}" & linefeed
-        end try
-        return output
-    on error errMsg
-        return "ERROR:" & errMsg
-    end try
-end tell"""
-
-
-def _build_all_lists_get_script(
-    include_completed: bool, limit: int, offset: int
-) -> str:
-    # include_completed is always False in the public API; hardcode filter
-    return f"""tell application "Reminders"
-    set output to ""
-    set hitCount to 0
-    set skipCount to 0
-    repeat with l in lists
-        set listName to name of l
-        set rems to reminders of l whose completed is false
-        set total to count of rems
-        if total > 0 then
-            -- Batch property fetch per list; silently skips lists with iCloud ghost objects
-            try
-                set allIds to id of rems
-                set allNames to name of rems
-                set allDates to due date of rems
-                set allBodies to body of rems
-                set allPris to priority of rems
-                repeat with i from 1 to total
-                    set rId to item i of allIds
-                    set rName to item i of allNames
-                    set rDate to item i of allDates
-                    set rBody to item i of allBodies
-                    set rPri to item i of allPris
-                    if skipCount < {offset} then
-                        set skipCount to skipCount + 1
-                    else
-                        set rLine to "list=" & listName & tab & "id=" & rId & tab & "title=" & rName
-                        if rDate is not missing value then
-                            set rLine to rLine & tab & "due=" & (rDate as string)
-                        end if
-                        set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
-                        if rBody is not missing value and rBody is not "" then
-                            set rLine to rLine & tab & "body=" & rBody
-                        end if
-                        set output to output & rLine & linefeed
-                        set hitCount to hitCount + 1
-                        if hitCount >= {limit} then return output
-                    end if
-                end repeat
-            on error
-                -- Reminders in this list are iCloud ghost objects (not yet synced)
-                set output to output & "__SKIPPED__" & tab & "list=" & listName & linefeed
-            end try
-        end if
-    end repeat
-    return output
-end tell"""
-
-
-# ---------------------------------------------------------------------------
-# AppleScript builders for search_reminders
-# ---------------------------------------------------------------------------
-
-
-def _build_single_list_search_script(
-    safe_list: str, safe_query: str, completed_clause: str, limit: int
-) -> str:
-    return f"""tell application "Reminders"
-    try
-        set rems to reminders of list "{safe_list}" {completed_clause}
-        set total to count of rems
-        if total is 0 then return ""
         set output to ""
         set hitCount to 0
-        -- Fast path: batch fetch then filter by name
-        try
-            set allIds to id of rems
-            set allNames to name of rems
-            set allDates to due date of rems
-            set allBodies to body of rems
-            set allPris to priority of rems
-            repeat with i from 1 to total
-                set rName to item i of allNames
-                if rName contains "{safe_query}" then
-                    set rId to item i of allIds
-                    set rDate to item i of allDates
-                    set rBody to item i of allBodies
-                    set rPri to item i of allPris
+        set skipCount to 0
+        repeat with r in (every reminder of list "{safe_list}")
+            if completed of r is false then
+                if skipCount < {offset} then
+                    set skipCount to skipCount + 1
+                else
+                    set rId to id of r
+                    set rName to name of r
+                    set rDate to due date of r
+                    set rBody to body of r
+                    set rPri to priority of r
                     set rLine to "id=" & rId & tab & "title=" & rName
                     if rDate is not missing value then
                         set rLine to rLine & tab & "due=" & (rDate as string)
@@ -261,11 +171,90 @@ def _build_single_list_search_script(
                     set hitCount to hitCount + 1
                     if hitCount >= {limit} then return output
                 end if
-            end repeat
-        on error
-            -- Reminders are iCloud ghost objects (not yet synced)
-            set output to "__SKIPPED__" & tab & "list=" & "{safe_list}" & linefeed
-        end try
+            end if
+        end repeat
+        return output
+    on error errMsg
+        return "ERROR:" & errMsg
+    end try
+end tell"""
+
+
+def _build_all_lists_get_script(
+    include_completed: bool, limit: int, offset: int
+) -> str:
+    # include_completed is always False in the public API; hardcode filter
+    # Uses `repeat with r in` iteration (NOT indexed access) to avoid
+    # hanging on ghost reminder objects.  Filters completed manually.
+    return f"""tell application "Reminders"
+    set output to ""
+    set hitCount to 0
+    set skipCount to 0
+    repeat with l in lists
+        set listName to name of l
+        repeat with r in (every reminder of l)
+            if completed of r is false then
+                if skipCount < {offset} then
+                    set skipCount to skipCount + 1
+                else
+                    set rId to id of r
+                    set rName to name of r
+                    set rDate to due date of r
+                    set rBody to body of r
+                    set rPri to priority of r
+                    set rLine to "list=" & listName & tab & "id=" & rId & tab & "title=" & rName
+                    if rDate is not missing value then
+                        set rLine to rLine & tab & "due=" & (rDate as string)
+                    end if
+                    set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
+                    if rBody is not missing value and rBody is not "" then
+                        set rLine to rLine & tab & "body=" & rBody
+                    end if
+                    set output to output & rLine & linefeed
+                    set hitCount to hitCount + 1
+                    if hitCount >= {limit} then return output
+                end if
+            end if
+        end repeat
+    end repeat
+    return output
+end tell"""
+
+
+# ---------------------------------------------------------------------------
+# AppleScript builders for search_reminders
+# ---------------------------------------------------------------------------
+
+
+def _build_single_list_search_script(
+    safe_list: str, safe_query: str, limit: int
+) -> str:
+    return f"""tell application "Reminders"
+    try
+        set output to ""
+        set hitCount to 0
+        repeat with r in (every reminder of list "{safe_list}")
+            if completed of r is false then
+                set rName to name of r
+                if rName contains "{safe_query}" then
+                    set rId to id of r
+                    set rDate to due date of r
+                    set rBody to body of r
+                    set rPri to priority of r
+                    set rLine to "id=" & rId & tab & "title=" & rName
+                    if rDate is not missing value then
+                        set rLine to rLine & tab & "due=" & (rDate as string)
+                    end if
+                    set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
+                    if rBody is not missing value and rBody is not "" then
+                        set rLine to rLine & tab & "body=" & rBody
+                    end if
+                    set output to output & rLine & linefeed
+                    set hitCount to hitCount + 1
+                    if hitCount >= {limit} then return output
+                end if
+            end if
+        end repeat
         return output
     on error errMsg
         return "ERROR:" & errMsg
@@ -274,48 +263,35 @@ end tell"""
 
 
 def _build_all_lists_search_script(
-    safe_query: str, completed_clause: str, limit: int
+    safe_query: str, limit: int
 ) -> str:
     return f"""tell application "Reminders"
     set output to ""
     set hitCount to 0
     repeat with l in lists
         set listName to name of l
-        set rems to reminders of l {completed_clause}
-        set total to count of rems
-        if total > 0 then
-            -- Fast path: batch fetch per list
-            try
-                set allIds to id of rems
-                set allNames to name of rems
-                set allDates to due date of rems
-                set allBodies to body of rems
-                set allPris to priority of rems
-                repeat with i from 1 to total
-                    set rName to item i of allNames
-                    if rName contains "{safe_query}" then
-                        set rId to item i of allIds
-                        set rDate to item i of allDates
-                        set rBody to item i of allBodies
-                        set rPri to item i of allPris
-                        set rLine to "list=" & listName & tab & "id=" & rId & tab & "title=" & rName
-                        if rDate is not missing value then
-                            set rLine to rLine & tab & "due=" & (rDate as string)
-                        end if
-                        set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
-                        if rBody is not missing value and rBody is not "" then
-                            set rLine to rLine & tab & "body=" & rBody
-                        end if
-                        set output to output & rLine & linefeed
-                        set hitCount to hitCount + 1
-                        if hitCount >= {limit} then return output
+        repeat with r in (every reminder of l)
+            if completed of r is false then
+                set rName to name of r
+                if rName contains "{safe_query}" then
+                    set rId to id of r
+                    set rDate to due date of r
+                    set rBody to body of r
+                    set rPri to priority of r
+                    set rLine to "list=" & listName & tab & "id=" & rId & tab & "title=" & rName
+                    if rDate is not missing value then
+                        set rLine to rLine & tab & "due=" & (rDate as string)
                     end if
-                end repeat
-            on error
-                -- Reminders in this list are iCloud ghost objects (not yet synced)
-                set output to output & "__SKIPPED__" & tab & "list=" & listName & linefeed
-            end try
-        end if
+                    set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
+                    if rBody is not missing value and rBody is not "" then
+                        set rLine to rLine & tab & "body=" & rBody
+                    end if
+                    set output to output & rLine & linefeed
+                    set hitCount to hitCount + 1
+                    if hitCount >= {limit} then return output
+                end if
+            end if
+        end repeat
     end repeat
     return output
 end tell"""
@@ -344,7 +320,7 @@ def register_tools(mcp: FastMCP) -> None:
     set output to ""
     repeat with l in lists
         set lName to name of l
-        set lCount to count of reminders of l
+        set lCount to count of (reminders of l whose completed is false)
         set output to output & "name=" & lName & tab & "count=" & lCount & linefeed
     end repeat
     return output
@@ -429,59 +405,47 @@ end tell"""
         safe_title = sanitize_for_applescript(title)
         script = f"""tell application "Reminders"
     try
-        set theList to list "{safe_list}"
-        set rems to reminders of theList
-        set total to count of rems
-        if total is 0 then return ""
         set output to ""
-        -- Batch name lookup, then fetch full details for the matching item
-        try
-            set allNames to name of rems
-            repeat with i from 1 to total
-                if (item i of allNames) is "{safe_title}" then
-                    set r to item i of rems
-                    set rId to id of r
-                    set rName to name of r
-                    set rComp to completed of r
-                    set rDue to due date of r
-                    set rRemind to remind me date of r
-                    set rCreate to creation date of r
-                    set rMod to modification date of r
-                    set rPri to priority of r
-                    set rUrl to url of r
-                    set rRecur to recurrence of r
-                    set rBody to body of r
-                    set rCompDate to completion date of r
-                    set rLine to "id=" & rId & tab & "title=" & rName
-                    set rLine to rLine & tab & "completed=" & rComp
-                    if rDue is not missing value then
-                        set rLine to rLine & tab & "due=" & (rDue as string)
-                    end if
-                    if rRemind is not missing value then
-                        set rLine to rLine & tab & "remind_me_date=" & (rRemind as string)
-                    end if
-                    set rLine to rLine & tab & "creation_date=" & (rCreate as string)
-                    set rLine to rLine & tab & "modification_date=" & (rMod as string)
-                    set rLine to rLine & tab & "priority=" & rPri
-                    if rUrl is not missing value and rUrl is not "" then
-                        set rLine to rLine & tab & "url=" & rUrl
-                    end if
-                    if rRecur is not missing value and rRecur is not "" then
-                        set rLine to rLine & tab & "recurrence=" & rRecur
-                    end if
-                    if rCompDate is not missing value then
-                        set rLine to rLine & tab & "completed_date=" & (rCompDate as string)
-                    end if
-                    if rBody is not missing value and rBody is not "" then
-                        set rLine to rLine & tab & "body=" & rBody
-                    end if
-                    set output to output & rLine & linefeed
+        repeat with r in (every reminder of list "{safe_list}")
+            if name of r is "{safe_title}" then
+                set rId to id of r
+                set rName to name of r
+                set rComp to completed of r
+                set rDue to due date of r
+                set rRemind to remind me date of r
+                set rCreate to creation date of r
+                set rMod to modification date of r
+                set rPri to priority of r
+                set rUrl to url of r
+                set rRecur to recurrence of r
+                set rBody to body of r
+                set rCompDate to completion date of r
+                set rLine to "id=" & rId & tab & "title=" & rName
+                set rLine to rLine & tab & "completed=" & rComp
+                if rDue is not missing value then
+                    set rLine to rLine & tab & "due=" & (rDue as string)
                 end if
-            end repeat
-        on error
-            -- Reminders are iCloud ghost objects (not yet synced)
-            set output to "__SKIPPED__" & tab & "list=" & "{safe_list}" & linefeed
-        end try
+                if rRemind is not missing value then
+                    set rLine to rLine & tab & "remind_me_date=" & (rRemind as string)
+                end if
+                set rLine to rLine & tab & "creation_date=" & (rCreate as string)
+                set rLine to rLine & tab & "modification_date=" & (rMod as string)
+                set rLine to rLine & tab & "priority=" & rPri
+                if rUrl is not missing value and rUrl is not "" then
+                    set rLine to rLine & tab & "url=" & rUrl
+                end if
+                if rRecur is not missing value and rRecur is not "" then
+                    set rLine to rLine & tab & "recurrence=" & rRecur
+                end if
+                if rCompDate is not missing value then
+                    set rLine to rLine & tab & "completed_date=" & (rCompDate as string)
+                end if
+                if rBody is not missing value and rBody is not "" then
+                    set rLine to rLine & tab & "body=" & rBody
+                end if
+                set output to output & rLine & linefeed
+            end if
+        end repeat
         return output
     on error errMsg
         return "ERROR:" & errMsg
@@ -533,15 +497,14 @@ end tell"""
 
         safe_query = sanitize_for_applescript(query)
         safe_list = sanitize_for_applescript(list_name) if list_name else None
-        completed_clause = "whose completed is false"
 
         if list_name:
             script = _build_single_list_search_script(
-                safe_list, safe_query, completed_clause, limit
+                safe_list, safe_query, limit
             )
             timeout = TIMEOUT_NORMAL
         else:
-            script = _build_all_lists_search_script(safe_query, completed_clause, limit)
+            script = _build_all_lists_search_script(safe_query, limit)
             timeout = TIMEOUT_CROSS_LIST
 
         try:
@@ -581,39 +544,26 @@ end tell"""
     set hitCount to 0
     repeat with l in lists
         set listName to name of l
-        set rems to reminders of l whose completed is false
-        set total to count of rems
-        if total > 0 then
-            -- Fast path: batch fetch per list, filter by date in loop
-            try
-                set allIds to id of rems
-                set allNames to name of rems
-                set allDates to due date of rems
-                set allBodies to body of rems
-                set allPris to priority of rems
-                repeat with i from 1 to total
-                    set rDate to item i of allDates
-                    if rDate is not missing value and rDate < now then
-                        set rId to item i of allIds
-                        set rName to item i of allNames
-                        set rBody to item i of allBodies
-                        set rPri to item i of allPris
-                        set rLine to "list=" & listName & tab & "id=" & rId & tab & "title=" & rName
-                        set rLine to rLine & tab & "due=" & (rDate as string)
-                        set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
-                        if rBody is not missing value and rBody is not "" then
-                            set rLine to rLine & tab & "body=" & rBody
-                        end if
-                        set output to output & rLine & linefeed
-                        set hitCount to hitCount + 1
-                        if hitCount >= {limit} then return output
+        repeat with r in (every reminder of l)
+            if completed of r is false then
+                set rDate to due date of r
+                if rDate is not missing value and rDate < now then
+                    set rId to id of r
+                    set rName to name of r
+                    set rBody to body of r
+                    set rPri to priority of r
+                    set rLine to "list=" & listName & tab & "id=" & rId & tab & "title=" & rName
+                    set rLine to rLine & tab & "due=" & (rDate as string)
+                    set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
+                    if rBody is not missing value and rBody is not "" then
+                        set rLine to rLine & tab & "body=" & rBody
                     end if
-                end repeat
-            on error
-                -- Reminders in this list are iCloud ghost objects (not yet synced)
-                set output to output & "__SKIPPED__" & tab & "list=" & listName & linefeed
-            end try
-        end if
+                    set output to output & rLine & linefeed
+                    set hitCount to hitCount + 1
+                    if hitCount >= {limit} then return output
+                end if
+            end if
+        end repeat
     end repeat
     return output
 end tell"""
@@ -648,39 +598,26 @@ end tell"""
     set hitCount to 0
     repeat with l in lists
         set listName to name of l
-        set rems to reminders of l whose completed is false
-        set total to count of rems
-        if total > 0 then
-            -- Fast path: batch fetch per list, filter by date in loop
-            try
-                set allIds to id of rems
-                set allNames to name of rems
-                set allDates to due date of rems
-                set allBodies to body of rems
-                set allPris to priority of rems
-                repeat with i from 1 to total
-                    set rDate to item i of allDates
-                    if rDate is not missing value and rDate >= now and rDate <= endDate then
-                        set rId to item i of allIds
-                        set rName to item i of allNames
-                        set rBody to item i of allBodies
-                        set rPri to item i of allPris
-                        set rLine to "list=" & listName & tab & "id=" & rId & tab & "title=" & rName
-                        set rLine to rLine & tab & "due=" & (rDate as string)
-                        set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
-                        if rBody is not missing value and rBody is not "" then
-                            set rLine to rLine & tab & "body=" & rBody
-                        end if
-                        set output to output & rLine & linefeed
-                        set hitCount to hitCount + 1
-                        if hitCount >= {limit} then return output
+        repeat with r in (every reminder of l)
+            if completed of r is false then
+                set rDate to due date of r
+                if rDate is not missing value and rDate >= now and rDate <= endDate then
+                    set rId to id of r
+                    set rName to name of r
+                    set rBody to body of r
+                    set rPri to priority of r
+                    set rLine to "list=" & listName & tab & "id=" & rId & tab & "title=" & rName
+                    set rLine to rLine & tab & "due=" & (rDate as string)
+                    set rLine to rLine & tab & "priority=" & rPri & tab & "completed=false"
+                    if rBody is not missing value and rBody is not "" then
+                        set rLine to rLine & tab & "body=" & rBody
                     end if
-                end repeat
-            on error
-                -- Reminders in this list are iCloud ghost objects (not yet synced)
-                set output to output & "__SKIPPED__" & tab & "list=" & listName & linefeed
-            end try
-        end if
+                    set output to output & rLine & linefeed
+                    set hitCount to hitCount + 1
+                    if hitCount >= {limit} then return output
+                end if
+            end if
+        end repeat
     end repeat
     return output
 end tell"""

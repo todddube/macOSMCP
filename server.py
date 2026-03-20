@@ -1,14 +1,24 @@
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
 """
 mac-bridge MCP Server
 
-Bridges Claude to macOS native apps via AppleScript. Provides read-only
-access to Reminders and Calendar. Mail support is planned for a future release.
+Bridges Claude to macOS native apps via AppleScript and Swift/EventKit.
+Provides access to Reminders, Calendar, and iMessage.
 
 Run with:
     uv run server.py
+    
+MAC_BRIDGE_LOG_LEVEL:   Output level for debugging (optional, default: WARNING)
+unset (default) 	    WARNING — errors only, silent in normal use
+INFO:               	startup message + "iMessage sent to..."
+DEBUG:              	everything including raw AppleScript scripts and Swift helper commands
+
 """
 
 import logging
+import os
 
 from fastmcp import FastMCP
 
@@ -16,11 +26,12 @@ from macos_mcp.calendar import register_tools as register_calendar_tools
 from macos_mcp.messaging import register_tools as register_messaging_tools
 from macos_mcp.reminders import register_tools as register_reminder_tools
 
+_log_level = getattr(logging, os.environ.get("MAC_BRIDGE_LOG_LEVEL", "WARNING").upper(), logging.WARNING)
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
-logger = logging.getLogger("macos_bridge")
+logger = logging.getLogger("mac_bridge")
 
 mcp = FastMCP(
     name="mac-bridge",

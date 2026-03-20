@@ -1,4 +1,7 @@
-"""Tests for tool registration, schema generation, and MCP compliance."""
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
+"""Tests for mac-bridge tool registration, schema generation, and MCP compliance."""
 
 import asyncio
 

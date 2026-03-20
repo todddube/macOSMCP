@@ -1,5 +1,8 @@
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
 """
-macOS Calendar tools for the macOS Apps MCP server.
+macOS Calendar tools for mac-bridge.
 
 Event queries (get_calendar_events, get_today_events, search_calendar_events)
 use a compiled Swift/EventKit helper for fast date-range lookups.  EventKit's

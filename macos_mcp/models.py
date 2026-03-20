@@ -1,5 +1,8 @@
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
 """
-Typed return models for macOS MCP tools.
+Typed return models for mac-bridge tools.
 
 FastMCP auto-generates ``outputSchema`` from these TypedDicts so that MCP
 clients can validate responses programmatically.

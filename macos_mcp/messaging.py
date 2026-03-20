@@ -1,5 +1,8 @@
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
 """
-macOS Messages tools for the macOS Apps MCP server.
+macOS Messages tools for mac-bridge.
 
 Sends iMessages via Messages.app AppleScript. Requires macOS Automation
 permission for Messages.app (TCC prompt on first use).

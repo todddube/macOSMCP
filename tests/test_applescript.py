@@ -1,4 +1,7 @@
-"""Tests for macos_mcp.applescript — sanitization, caching, and helpers."""
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
+"""Tests for mac-bridge applescript module — sanitization, caching, and helpers."""
 
 import time
 

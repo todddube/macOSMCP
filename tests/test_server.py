@@ -1,4 +1,7 @@
-"""Tests for the server entry point and MCP server configuration."""
+# mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage
+# Author: Todd Dube | March 2026
+
+"""Tests for the mac-bridge server entry point and MCP server configuration."""
 
 import asyncio
 
