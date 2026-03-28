@@ -149,7 +149,7 @@ def _run_swift_helper(
 def register_tools(mcp: FastMCP) -> None:
     """Register all Calendar tools on the given FastMCP instance."""
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=60)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=60)
     def list_calendars() -> CalendarListResult:
         """List all calendars in macOS Calendar.
 
@@ -193,7 +193,7 @@ end tell"""
             logger.error("list_calendars failed: %s", exc)
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=30)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=30)
     def get_calendar_events(
         calendar_name: Annotated[Optional[str], Field(description="Name of a specific calendar. Omit for all calendars.")] = None,
         start_date: Annotated[Optional[str], Field(description="Start of range as YYYY-MM-DD (default: today)")] = None,
@@ -238,7 +238,7 @@ end tell"""
             "calendar": calendar_name or "all",
         }
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=30)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=30)
     def get_today_events(
         calendar_name: Annotated[Optional[str], Field(description="Scope to one calendar. Omit for all calendars.")] = None,
     ) -> TodayEventsResult:
@@ -272,7 +272,7 @@ end tell"""
             "calendar": calendar_name or "all",
         }
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=30)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=30)
     def search_calendar_events(
         query: Annotated[str, Field(min_length=1, description="Text to find in event titles")],
         calendar_name: Annotated[Optional[str], Field(description="Scope to one calendar. Omit for all calendars.")] = None,

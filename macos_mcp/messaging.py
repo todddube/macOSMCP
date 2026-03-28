@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def register_tools(mcp: FastMCP) -> None:
     @mcp.tool(
-        annotations={"readOnlyHint": False},
+        annotations={"readOnlyHint": False, "destructiveHint": True},
     )
     def send_imessage(
         recipient: Annotated[

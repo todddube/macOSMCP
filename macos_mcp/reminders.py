@@ -11,6 +11,7 @@ handle filtering — dramatically reducing latency for large lists.
 """
 
 import logging
+from datetime import datetime
 from typing import Annotated, Optional
 
 from fastmcp import FastMCP
@@ -51,6 +52,23 @@ _PRIORITY_MAP: dict[str, str] = {
 
 
 _SKIPPED_PREFIX = "__SKIPPED__"
+
+# AppleScript date string format on macOS English locale:
+# "Saturday, March 28, 2026 at 12:00:00 AM"
+_APPLESCRIPT_DATE_FORMATS = (
+    "%A, %B %d, %Y at %I:%M:%S %p",
+    "%A, %B %d, %Y",
+)
+
+
+def _parse_due_for_sort(due_str: str) -> datetime:
+    """Parse an AppleScript date string for sort ordering. Returns datetime.min on failure."""
+    for fmt in _APPLESCRIPT_DATE_FORMATS:
+        try:
+            return datetime.strptime(due_str, fmt)
+        except ValueError:
+            continue
+    return datetime.min
 
 
 def _split_skipped_lines(raw_lines: list[str]) -> tuple[list[str], list[dict]]:
@@ -305,7 +323,7 @@ end tell"""
 def register_tools(mcp: FastMCP) -> None:
     """Register all Reminders tools on the given FastMCP instance."""
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=60)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=60)
     def list_reminders() -> ReminderListsResult:
         """List all Reminder lists in macOS Reminders.
 
@@ -335,7 +353,7 @@ end tell"""
             logger.error("list_reminder_lists failed: %s", exc)
             raise ToolError(str(exc)) from exc
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=90)
     def get_reminders(
         list_name: Annotated[Optional[str], Field(description="Name of a specific list to query. Omit for all lists.")] = None,
         limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
@@ -386,7 +404,7 @@ end tell"""
         }
         return _add_skipped_warning(result, skipped)
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=60)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=60)
     def get_reminder_detail(
         list_name: Annotated[str, Field(description="The list containing the reminder")],
         title: Annotated[str, Field(description="Title (name) of the reminder")],
@@ -475,7 +493,7 @@ end tell"""
         }
         return _add_skipped_warning(result, skipped)
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=90)
     def search_reminders(
         query: Annotated[str, Field(min_length=1, description="Text to find in reminder titles")],
         list_name: Annotated[Optional[str], Field(description="Scope search to one list. Omit for all lists.")] = None,
@@ -527,7 +545,7 @@ end tell"""
         result: dict = {"query": query, "results": results, "count": len(results)}
         return _add_skipped_warning(result, skipped)
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=90)
     def get_overdue_reminders(
         limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,
     ) -> OverdueRemindersResult:
@@ -575,10 +593,11 @@ end tell"""
 
         data_lines, skipped = _split_skipped_lines(raw_lines)
         results = [_parse_tsv_line(ln) for ln in data_lines]
+        results.sort(key=lambda r: _parse_due_for_sort(r.get("due", "")))
         result: dict = {"reminders": results, "count": len(results)}
         return _add_skipped_warning(result, skipped)
 
-    @mcp.tool(annotations={"readOnlyHint": True}, timeout=90)
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True}, timeout=90)
     def get_upcoming_reminders(
         days: Annotated[int, Field(ge=0, le=365, description="Number of days to look ahead")] = 7,
         limit: Annotated[int, Field(ge=1, le=200, description="Maximum results to return")] = 50,

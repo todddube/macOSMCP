@@ -10,7 +10,7 @@ clients can validate responses programmatically.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +43,8 @@ class RemindersResult(TypedDict):
     count: int
     list: str
     offset: int
+    skipped_lists: NotRequired[list[str]]
+    warning: NotRequired[str]
 
 
 class ReminderDetailResult(TypedDict):
@@ -50,23 +52,31 @@ class ReminderDetailResult(TypedDict):
     count: int
     list: str
     query_title: str
+    skipped_lists: NotRequired[list[str]]
+    warning: NotRequired[str]
 
 
 class ReminderSearchResult(TypedDict):
     query: str
     results: list[ReminderItem]
     count: int
+    skipped_lists: NotRequired[list[str]]
+    warning: NotRequired[str]
 
 
 class OverdueRemindersResult(TypedDict):
     reminders: list[ReminderItem]
     count: int
+    skipped_lists: NotRequired[list[str]]
+    warning: NotRequired[str]
 
 
 class UpcomingRemindersResult(TypedDict):
     reminders: list[ReminderItem]
     count: int
     days: int
+    skipped_lists: NotRequired[list[str]]
+    warning: NotRequired[str]
 
 
 # ---------------------------------------------------------------------------
