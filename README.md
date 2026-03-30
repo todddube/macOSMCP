@@ -318,11 +318,80 @@ macOSMCP/
 - [ ] `get_email_body(message_id)`
 
 ### Phase 5 — Scheduled Daily Briefing Agent
-- [ ] Headless Python agent (`scheduled_agent.py`) runs via launchd at 7:00 AM
-- [ ] Fetches calendar events + reminders via FastMCP Client
-- [ ] Summarizes with a single Claude API call (Anthropic Python SDK)
-- [ ] Emails HTML briefing to configured recipient
-- [ ] See `AIAgentAutomate_Specs.md` for full design
+- [x] Headless Python agent (`scheduled_agent.py`) runs via launchd at 7:00 AM
+- [x] Fetches calendar events + reminders via FastMCP Client
+- [x] Summarizes with local Ollama (`qwen3-fast:latest`) — zero cost, fully private
+- [x] Emails HTML briefing via Mail.app (no credentials needed)
+- [x] iMessage push alert alongside email
+- [ ] launchd schedule activated (see Daily Briefing Agent section below)
+
+---
+
+## Daily Briefing Agent
+
+`scheduled_agent.py` fetches today's calendar events and reminders via the MCP server, generates an HTML email summary using a local Ollama model, sends it via Mail.app, and fires an iMessage nudge — all with no cloud API calls.
+
+### Requirements
+
+- [Ollama](https://ollama.com) installed with `qwen3-fast:latest` pulled
+- `uv sync --extra agent` run at least once
+
+```bash
+# One-time setup
+brew install ollama
+ollama pull qwen3-fast:latest
+uv sync --extra agent
+mkdir -p ~/Library/Logs/macOSMCP
+```
+
+### Test runs
+
+```bash
+# Dry run — generates HTML and prints to stdout, no email or iMessage sent
+uv run --extra agent scheduled_agent.py --dry-run
+
+# Live run — sends email via Mail.app + iMessage nudge
+uv run --extra agent scheduled_agent.py
+```
+
+### Watch logs
+
+```bash
+tail -f ~/Library/Logs/macOSMCP/scheduled_agent.log
+```
+
+### Schedule with launchd (runs daily at 7:00 AM)
+
+```bash
+# Ensure Ollama starts at login
+brew services start ollama
+
+# Load the schedule (plist is already in ~/Library/LaunchAgents/)
+launchctl load ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
+
+# Trigger a test run immediately (check logs after)
+launchctl start com.thedubes.daily-briefing
+
+# Verify it loaded and check last exit status
+launchctl list | grep daily-briefing
+
+# Unload if you want to disable it
+launchctl unload ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
+| `OLLAMA_MODEL` | `qwen3-fast:latest` | Model to use for summarization |
+| `IMESSAGE_RECIPIENT` | `+18044328850` | Phone or Apple ID for push nudge |
+
+Override at runtime:
+
+```bash
+OLLAMA_MODEL=llama3:latest uv run --extra agent scheduled_agent.py --dry-run
+```
 
 ---
 

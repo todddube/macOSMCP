@@ -9,6 +9,7 @@
 | Reminders | 6 tools (list, get, detail, search, overdue, upcoming) | Working, read-only |
 | Calendar | 4 tools (list, get_events, today, search) | Working, read-only |
 | Messaging | 1 tool (send_imessage) | Working, write |
+| Daily Briefing Agent | `scheduled_agent.py` + launchd plist | Built — dry-run test pending |
 | Tests | 90 pytest tests (parsing, sanitization, registration, mocked integration) | Passing |
 | Mail | — | Not started |
 
@@ -65,12 +66,15 @@ Claude Code / Claude Desktop
 
 ### P1 — In Progress / Up Next
 
-- [ ] **Scheduled daily briefing agent** (`scheduled_agent.py` via launchd)
-  - Fetches calendar + reminders via FastMCP Client
-  - Single Claude API call for HTML summary generation
-  - Emails HTML briefing to `todd@thedubes.com`
-  - iPhone push nudge alongside email
-  - Full implementation plan in [Daily Briefing Agent](#daily-briefing-agent) section
+- **Scheduled daily briefing agent** (`scheduled_agent.py` via launchd)
+  - [x] `scheduled_agent.py` built — Mail.app email + iMessage nudge + `--dry-run`
+  - [x] Ollama (`qwen3-fast:latest`) replaces Anthropic API — zero cost, fully local
+  - [x] `<think>` tag stripping for qwen3 thinking models
+  - [x] launchd plist created at `~/Library/LaunchAgents/com.thedubes.daily-briefing.plist` (7:00 AM daily)
+  - [ ] **Next: dry-run test** — `uv run --extra agent scheduled_agent.py --dry-run`
+  - [ ] Verify HTML output quality
+  - [ ] Verify email via Mail.app
+  - [ ] `brew services start ollama` → `launchctl load` → activate schedule
 
 ### P2 — New Features
 
@@ -96,7 +100,7 @@ Claude Code / Claude Desktop
 
 - [ ] **Async AppleScript execution** — replace `subprocess.run()` with `asyncio.create_subprocess_exec()` so blocking calls don't stall FastMCP event loop
 - [ ] **Progress reporting** — use `Context.report_progress()` for slow cross-list queries
-- [ ] **File-based logging** — move to `~/Library/Logs/macOSMCP/`; stdout interferes with stdio transport
+- [x] **File-based logging** — `~/Library/Logs/macOSMCP/` (used by `scheduled_agent.py`); MCP server still logs to stdout (acceptable for stdio transport)
 - [ ] **`search_tools` meta-tool** — when tool count exceeds ~15, lets LLM discover tools on-demand (Anthropic-recommended pattern for scale)
 
 ---
@@ -128,18 +132,55 @@ scheduled_agent.py
     +-- iPhone alert (pick option below)  -->  iPhone
 ```
 
+### launchd + Python: Is This the Right macOS Pattern?
+
+**Yes.** `~/Library/LaunchAgents/` UserAgents are the standard macOS scheduler for user-context tasks. Key reasons this is correct:
+
+- **TCC permissions** — runs as your user, so it inherits Reminders/Calendar/Messages automation access already granted
+- **`uv run` under launchd** — works correctly; uv manages the virtualenv; deps resolve from `pyproject.toml` automatically
+- **Startup overhead** — ~1–2s for uv + Python startup is fine for a daily job
+- **Alternative considered: cron** — cron lacks `EnvironmentVariables`, log path config, and the run-at-boot/wake semantics; launchd is strictly better on macOS
+
+No change needed here — the existing plist design is correct.
+
+### LLM Options: Anthropic API vs. Ollama (Local)
+
+**Ollama on Mac Mini (Apple Silicon) is a fully viable alternative.** No API cost, no data leaving the machine, works offline.
+
+| | Anthropic API (Claude) | Ollama (Local) |
+|---|---|---|
+| Cost | ~$0.02/run (~$0.60/mo) | Free |
+| Privacy | Data sent to Anthropic | Stays on device |
+| HTML quality | Excellent | Good (model-dependent) |
+| Offline | No | Yes |
+| Setup | API key in Keychain | `brew install ollama` |
+| Model swap | n/a | Pick any Ollama model |
+| Startup latency | ~1s network | ~1–3s model load (cached) |
+
+**Recommended Ollama models for Mac Mini (Apple Silicon):**
+
+| Model | Size | Speed | HTML quality |
+|---|---|---|---|
+| `qwen2.5:7b` | 4.7 GB | Fast | Best for structured output |
+| `llama3.1:8b` | 4.9 GB | Fast | Good general purpose |
+| `mistral:7b` | 4.1 GB | Fastest | Good |
+| `llama3.2:3b` | 2.0 GB | Very fast | Acceptable |
+
+**Recommendation:** Use Ollama for zero cost + privacy. `qwen2.5:7b` is the best choice for HTML generation from structured data.
+
 ### Approach Comparison
 
-| | Option A: Hybrid (Recommended) | Option B: SDK + Manual Tools | Option C: No-LLM |
+| | Option A: Claude API (current) | Option B: Ollama (local) | Option C: No-LLM |
 |---|---|---|---|
-| Data fetching | FastMCP Client | Manual tool loop | FastMCP Client |
-| Summarization | Single `messages.create()` | Built into tool loop | Python template |
-| API calls | 1 | 3-4 | 0 |
-| Cost per run | ~$0.01 | ~$0.02 | $0 |
+| Data fetching | FastMCP Client | FastMCP Client | FastMCP Client |
+| Summarization | Single Anthropic API call | Single Ollama local call | Python template |
+| API calls | 1 (external) | 1 (localhost) | 0 |
+| Cost per run | ~$0.02 | $0 | $0 |
 | Conflict detection | Yes | Yes | No |
-| Lines of code | ~80 | ~120 | ~60 |
+| Privacy | Data sent to Anthropic | Stays on Mac Mini | Stays on Mac Mini |
+| Lines of code | ~80 | ~80 (swap 5 lines) | ~60 |
 
-**Recommendation: Option A (Hybrid)** — FastMCP Client for data, single Claude call for summary.
+**Recommendation: Option B (Ollama)** for a Mac Mini that's always on — zero cost, private, no API key to manage. Fall back to Option A if HTML quality is insufficient.
 
 ### Implementation Code (Option A)
 
@@ -152,7 +193,7 @@ from datetime import date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import anthropic
+from ollama import chat as ollama_chat
 from fastmcp import Client
 
 RECIPIENT = "todd@thedubes.com"
@@ -217,16 +258,21 @@ async def fetch_data() -> tuple[str, str, str]:
 
 
 def generate_summary(events_json: str, overdue_json: str, upcoming_json: str) -> str:
-    client = anthropic.Anthropic()
     prompt = SUMMARY_PROMPT.format(
         today=TODAY.isoformat(), end=END.isoformat(),
         events_json=events_json, overdue_json=overdue_json, upcoming_json=upcoming_json,
     )
-    msg = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=4096,
+    response = ollama_chat(
+        model=os.environ.get("OLLAMA_MODEL", "qwen3-fast:latest"),
         messages=[{"role": "user", "content": prompt}],
+        options={"num_predict": 4096},
     )
-    return msg.content[0].text
+    html = response.message.content
+    # qwen3 is a thinking model — strip <think>...</think> blocks
+    import re
+    html = re.sub(r"<think>.*?</think>", "", html, flags=re.DOTALL).strip()
+    html = re.sub(r"^```[a-z]*\n?", "", html).rstrip("```").strip()
+    return html
 
 
 def send_email(html_body: str) -> None:
@@ -316,12 +362,11 @@ def send_via_mail_app(html_body: str, subject: str, recipient: str):
     </dict>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>ANTHROPIC_API_KEY</key><string>sk-ant-REPLACE-ME</string>
-        <key>SMTP_HOST</key><string>smtp.gmail.com</string>
-        <key>SMTP_PORT</key><string>587</string>
-        <key>SMTP_USER</key><string>REPLACE-ME</string>
-        <key>SMTP_PASSWORD</key><string>REPLACE-ME</string>
-        <key>FROM_ADDR</key><string>REPLACE-ME</string>
+        <key>OLLAMA_HOST</key><string>http://localhost:11434</string>
+        <key>OLLAMA_MODEL</key><string>qwen3-fast:latest</string>
+        <key>IMESSAGE_RECIPIENT</key><string>+18044328850</string>
+        <key>HOME</key><string>/Users/todddube</string>
+        <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
     <key>StandardOutPath</key>
     <string>/Users/todddube/Library/Logs/macOSMCP/launchd-stdout.log</string>
@@ -339,54 +384,39 @@ tail -f ~/Library/Logs/macOSMCP/scheduled_agent.log
 launchctl unload ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
 ```
 
-### Keychain Security (Recommended over plist env vars)
-
-```python
-import subprocess
-
-def get_keychain_password(service: str, account: str) -> str:
-    result = subprocess.run(
-        ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
-        capture_output=True, text=True, check=True,
-    )
-    return result.stdout.strip()
-
-# Store once:  security add-generic-password -s "daily-briefing" -a "anthropic" -w "sk-ant-..."
-# Read:        ANTHROPIC_API_KEY = get_keychain_password("daily-briefing", "anthropic")
-```
-
 ### Cost Per Run
 
-| Component | Tokens | Cost (Sonnet 4.6) |
-|---|---|---|
-| Prompt + raw data | ~2,000 input | ~$0.006 |
-| HTML summary output | ~1,500 output | ~$0.015 |
-| **Total / run** | | **~$0.02** |
-| **Monthly (30 days)** | | **~$0.60** |
+| Component | Cost |
+|---|---|
+| Ollama (`qwen3-fast:latest`) | **$0** — runs locally on Mac Mini |
+| Mail.app AppleScript | **$0** |
+| iMessage via `send_imessage` | **$0** |
+| **Total / run** | **$0** |
 
 ### Implementation Checklist
 
-#### Phase 1 — MVP
-- [x] Add `anthropic` dep: `uv add --optional agent anthropic` (v0.86.0)
-- [x] Create `scheduled_agent.py` (Mail.app email + iMessage nudge + `--dry-run`)
-- [x] Create `~/Library/Logs/macOSMCP/` directory
-- [x] Pick email method → Mail.app AppleScript (no credentials needed)
-- [x] Pick push method → iMessage via `send_imessage` (already built)
-- [x] MCP data fetch verified (events, overdue, upcoming)
-- [ ] Test full run: `uv run --extra agent scheduled_agent.py` (requires API credits)
-- [ ] Verify email arrives with correct formatting
+#### Phase 1 — MVP ✓
+- [x] `ollama` dep added (`ollama==0.6.1`); Anthropic dep removed
+- [x] Create `scheduled_agent.py` — Mail.app email + iMessage nudge + `--dry-run`
+- [x] `generate_summary()` uses Ollama (`qwen3-fast:latest`); `<think>` tag stripping
+- [x] `~/Library/Logs/macOSMCP/` log directory created
+- [x] Email → Mail.app AppleScript (no credentials needed)
+- [x] Push → iMessage via `send_imessage` (already built into MCP server)
+- [ ] **Dry-run test:** `uv run --extra agent scheduled_agent.py --dry-run`
+- [ ] Verify HTML output quality; switch model via `OLLAMA_MODEL=` if needed
+- [ ] Verify email arrives with correct formatting in Mail.app
 
 #### Phase 2 — Schedule
-- [ ] Create launchd plist at `~/Library/LaunchAgents/com.thedubes.daily-briefing.plist`
-- [ ] `launchctl load` + test with `launchctl start`
+- [x] launchd plist created at `~/Library/LaunchAgents/com.thedubes.daily-briefing.plist`
+- [ ] `brew services start ollama` — ensure Ollama auto-starts at login
+- [ ] `launchctl load ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist`
+- [ ] `launchctl start com.thedubes.daily-briefing` — trigger test run
 - [ ] Verify logs at `~/Library/Logs/macOSMCP/`
 
 #### Phase 3 — Harden
-- [ ] Move secrets to macOS Keychain
-- [ ] Add retry logic (1 retry on network failure)
-- [ ] Add `--dry-run` flag (prints HTML to stdout instead of emailing)
-- [ ] Pick + integrate iPhone push notification (see below)
+- [ ] Add retry logic (1 retry on Ollama/network failure)
 - [ ] Add "last successful run" timestamp file for monitoring
+- [ ] Move any future secrets to macOS Keychain
 
 ---
 
@@ -546,13 +576,25 @@ Per [FastMCP docs](https://gofastmcp.com/servers/tools):
 ```toml
 # pyproject.toml — core deps already installed
 [project.optional-dependencies]
-agent = ["anthropic>=0.42.0"]
+agent = ["anthropic>=0.42.0", "ollama>=0.4.0"]
 ```
 
 ```bash
+# Anthropic path
 uv sync --extra agent
+
+# Ollama path — also install + pull model
+brew install ollama
+ollama serve &          # start daemon (or add to LaunchAgents)
+ollama pull qwen2.5:7b  # ~4.7 GB, best for structured HTML output
+
+# Set model via env var (default: qwen2.5:7b)
+OLLAMA_MODEL=llama3.1:8b uv run --extra agent scheduled_agent.py --dry-run
+
 # If using Pushover or ntfy.sh alerts, also: uv add --optional agent httpx
 ```
+
+> **launchd note for Ollama:** If running `scheduled_agent.py` under launchd, add `OLLAMA_HOST` to the plist's `EnvironmentVariables` (default: `http://localhost:11434`) and ensure `ollama serve` is running as a LaunchAgent separately, or use `brew services start ollama` to auto-start it at login.
 
 ---
 
