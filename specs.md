@@ -9,9 +9,10 @@
 | Reminders | 6 tools (list, get, detail, search, overdue, upcoming) | Working, read-only |
 | Calendar | 4 tools (list, get_events, today, search) | Working, read-only |
 | Messaging | 1 tool (send_imessage) | Working, write |
-| Daily Briefing Agent | `scheduled_agent.py` + launchd plist | Built — dry-run test pending |
-| Tests | 90 pytest tests (parsing, sanitization, registration, mocked integration) | Passing |
-| Mail | — | Not started |
+| Mail | 4 tools (list_mailboxes, get_unread_emails, search_emails, get_email_detail) | Working, read-only |
+| MCP Prompts | 2 prompts (daily_planner, weekly_review) | Working |
+| Daily Briefing Agent | `scheduled_agent.py` + launchd plist + install scripts | Built — dry-run / email / launchd activation pending |
+| Tests | 127 pytest tests (parsing, sanitization, registration, mocked integration, prompts) | Passing |
 
 ### Architecture
 
@@ -20,7 +21,7 @@ Claude Code / Claude Desktop
         |
         |  MCP (stdio transport, JSON-RPC 2.0)
         v
-  server.py              (FastMCP 3.0.2 entry point, on_duplicate="error")
+  server.py              (FastMCP 3.x entry point, on_duplicate="error")
         |
   macos_mcp/
     applescript.py       (osascript subprocess + timeout + TTL cache + sanitization)
@@ -28,11 +29,13 @@ Claude Code / Claude Desktop
     reminders.py         (6 tools — per-item AppleScript iteration, ToolError on failure)
     calendar.py          (4 tools — Swift/EventKit for events, AppleScript for list)
     messaging.py         (1 tool — send_imessage via Messages.app AppleScript)
+    mail.py              (4 tools — Mail.app batch property fetch + per-item search)
+    prompts.py           (2 MCP prompts — daily_planner, weekly_review)
         |
         ├── subprocess -> swift/calendar_helper (EventKit, indexed queries, <1s)
-        └── subprocess -> osascript (Reminders + list_calendars + send_imessage)
+        └── subprocess -> osascript (Reminders + Calendars + Messages + Mail)
         v
-  macOS Reminders.app / Calendar.app / Messages.app
+  macOS Reminders.app / Calendar.app / Messages.app / Mail.app
 
   swift/
     calendar_helper.swift  (EventKit CLI — fast date-range event queries)
@@ -41,9 +44,10 @@ Claude Code / Claude Desktop
   tests/
     test_applescript.py        (sanitization, cache, run_applescript)
     test_parsing.py            (reminders + calendar TSV parsing)
-    test_tool_registration.py  (11 tools, readOnlyHint, timeouts, schemas)
+    test_tool_registration.py  (14 read-only tools, readOnlyHint, timeouts, schemas)
     test_tools_mocked.py       (full tool flows with mocked subprocess)
-    test_server.py             (server config verification)
+    test_server.py             (15 total tools, server config)
+    test_mail.py               (mail TSV parsing, 4 tools, prompts)
 ```
 
 ---
@@ -68,22 +72,32 @@ Claude Code / Claude Desktop
 
 - **Scheduled daily briefing agent** (`scheduled_agent.py` via launchd)
   - [x] `scheduled_agent.py` built — Mail.app email + iMessage nudge + `--dry-run`
-  - [x] Ollama (`qwen3-fast:latest`) replaces Anthropic API — zero cost, fully local
-  - [x] `<think>` tag stripping for qwen3 thinking models
-  - [x] launchd plist created at `~/Library/LaunchAgents/com.thedubes.daily-briefing.plist` (7:00 AM daily)
+  - [x] Ollama (`qwen2.5:7b` default; `qwen3-fast:latest` also supported) — zero cost, fully local
+  - [x] `<think>` tag stripping for qwen3 thinking models (regex in `generate_summary()`)
+  - [x] launchd plist at project root `com.thedubes.daily-briefing.plist` (7:00 AM daily)
+  - [x] `scripts/install-briefing.sh` / `uninstall-briefing.sh` — copy plist to LaunchAgents + load/unload
   - [ ] **Next: dry-run test** — `uv run --extra agent scheduled_agent.py --dry-run`
-  - [ ] Verify HTML output quality
-  - [ ] Verify email via Mail.app
-  - [ ] `brew services start ollama` → `launchctl load` → activate schedule
+  - [ ] Verify HTML output quality; switch model via `OLLAMA_MODEL=` if needed
+  - [ ] Verify email arrives with correct formatting in Mail.app
+  - [ ] `brew services start ollama` → `bash scripts/install-briefing.sh` → activate schedule
 
 ### P2 — New Features
 
-- [ ] **Mail integration (read-only)**
-  - `list_mailboxes()` — all accounts/mailboxes
-  - `get_unread_emails(mailbox?, account?, count?)` — recent unread
-  - `search_emails(query, mailbox?, count?)` — subject/sender search
-  - `get_email_detail(message_id)` — full body + headers
-  - Uses same batch AppleScript pattern; Mail.app supports batch property fetching
+- [x] **Mail integration (read-only MCP tools)** — `macos_mcp/mail.py`
+  - `list_mailboxes()` — all accounts/mailboxes with unread counts; 30s TTL cached
+  - `get_unread_emails(mailbox?, account?, count=20)` — batch property fetch (Mail.app supports it unlike Reminders)
+  - `search_emails(query, mailbox?, count=20)` — subject/sender per-item search, early exit
+  - `get_email_detail(message_id, mailbox?)` — full body by RFC 2822 Message-ID; `body=` always last in TSV
+  - TypedDicts: `MailboxesResult`, `EmailListResult`, `EmailSearchResult`, `EmailDetailResult` in `models.py`
+  - 37 new tests in `tests/test_mail.py`
+
+- [x] **Mail follow-up in Daily Briefing** (`scheduled_agent.py`)
+  - `fetch_data()` calls `get_unread_emails` and returns 4-tuple `(events, overdue, upcoming, mail)`
+  - `SUMMARY_PROMPT` includes `{mail_json}` section + **Email Follow-up card** (purple accent)
+  - Model flags time-sensitive subjects: "urgent", "action required", "deadline", "invoice", "payment"
+  - Config: `MAIL_COUNT` env var (default 20, set 0 to disable); `MAIL_MAILBOX` to scope to one mailbox
+  - iMessage nudge includes `✉️ N unread emails` line
+  - Mail.app requires Automation TCC permission (one-time prompt on first run)
 
 - [ ] **Write operations for Reminders**
   - `create_reminder(title, list_name, due_date?, note?)` — `destructiveHint: False`
@@ -91,10 +105,10 @@ Claude Code / Claude Desktop
   - `delete_reminder(title, list_name)` — `destructiveHint: True`
   - Gate behind config flag (default off) to keep server read-only unless opted in
 
-- [ ] **MCP Prompts** — structured workflow templates (not tools)
-  - `daily_planner` — "What's on my calendar today + overdue/upcoming reminders?"
-  - `weekly_review` — "Show me this week's events and any overdue items"
-  - See [MCP Prompts spec](https://modelcontextprotocol.io/specification/2025-06-18/server/prompts)
+- [x] **MCP Prompts** — structured workflow templates (`macos_mcp/prompts.py`)
+  - `daily_planner` — calls `get_today_events` + `get_overdue_reminders` + `get_upcoming_reminders(days=3)`; presents Today / Overdue / Due Soon
+  - `weekly_review` — calls `get_calendar_events(7 days)` + `get_overdue_reminders` + `get_upcoming_reminders(days=7)`; presents full week grouped by day with summary line
+  - Both return `str` (FastMCP wraps as user-role `PromptMessage`)
 
 ### P3 — Polish & Scale
 
@@ -118,18 +132,20 @@ launchd (daily @ 7:00 AM)
 scheduled_agent.py
     |
     +-- FastMCP Client (stdio transport)
-    |       +-- get_calendar_events  (next 7 days)
+    |       +-- get_calendar_events       (next 7 days)
     |       +-- get_overdue_reminders
-    |       +-- get_upcoming_reminders (7 days)
+    |       +-- get_upcoming_reminders    (7 days)
+    |       +-- get_unread_emails         (MAIL_COUNT emails, default 20; set 0 to disable)
     |       v
-    |   Structured JSON data
+    |   Structured dicts via CallToolResult.structured_content
     |
-    +-- Anthropic Python SDK
+    +-- Ollama (local, http://localhost:11434)        ← zero cost, fully private
+    |       model: qwen2.5:7b (default) or OLLAMA_MODEL env var
     |       v
-    |   Claude generates HTML summary
+    |   HTML summary (with <think> tag stripping for thinking models)
     |
-    +-- Email (smtplib / Mail.app)  -->  todd@thedubes.com
-    +-- iPhone alert (pick option below)  -->  iPhone
+    +-- Email → Mail.app AppleScript   -->  todd@thedubes.com
+    +-- iPhone nudge → send_imessage   -->  iPhone
 ```
 
 ### launchd + Python: Is This the Right macOS Pattern?
@@ -263,7 +279,7 @@ def generate_summary(events_json: str, overdue_json: str, upcoming_json: str) ->
         events_json=events_json, overdue_json=overdue_json, upcoming_json=upcoming_json,
     )
     response = ollama_chat(
-        model=os.environ.get("OLLAMA_MODEL", "qwen3-fast:latest"),
+        model=os.environ.get("OLLAMA_MODEL", "qwen2.5:7b"),
         messages=[{"role": "user", "content": prompt}],
         options={"num_predict": 4096},
     )
@@ -363,7 +379,8 @@ def send_via_mail_app(html_body: str, subject: str, recipient: str):
     <key>EnvironmentVariables</key>
     <dict>
         <key>OLLAMA_HOST</key><string>http://localhost:11434</string>
-        <key>OLLAMA_MODEL</key><string>qwen3-fast:latest</string>
+        <!-- OLLAMA_MODEL: qwen2.5:7b (best HTML quality) or qwen3-fast:latest (faster, strip <think> tags) -->
+        <key>OLLAMA_MODEL</key><string>qwen2.5:7b</string>
         <key>IMESSAGE_RECIPIENT</key><string>+18044328850</string>
         <key>HOME</key><string>/Users/todddube</string>
         <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
@@ -388,7 +405,7 @@ launchctl unload ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
 
 | Component | Cost |
 |---|---|
-| Ollama (`qwen3-fast:latest`) | **$0** — runs locally on Mac Mini |
+| Ollama (`qwen2.5:7b` default) | **$0** — runs locally on Mac Mini |
 | Mail.app AppleScript | **$0** |
 | iMessage via `send_imessage` | **$0** |
 | **Total / run** | **$0** |
@@ -398,7 +415,7 @@ launchctl unload ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
 #### Phase 1 — MVP ✓
 - [x] `ollama` dep added (`ollama==0.6.1`); Anthropic dep removed
 - [x] Create `scheduled_agent.py` — Mail.app email + iMessage nudge + `--dry-run`
-- [x] `generate_summary()` uses Ollama (`qwen3-fast:latest`); `<think>` tag stripping
+- [x] `generate_summary()` uses Ollama (`qwen2.5:7b` default; `qwen3-fast:latest` also supported); `<think>` tag stripping
 - [x] `~/Library/Logs/macOSMCP/` log directory created
 - [x] Email → Mail.app AppleScript (no credentials needed)
 - [x] Push → iMessage via `send_imessage` (already built into MCP server)
@@ -407,9 +424,11 @@ launchctl unload ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
 - [ ] Verify email arrives with correct formatting in Mail.app
 
 #### Phase 2 — Schedule
-- [x] launchd plist created at `~/Library/LaunchAgents/com.thedubes.daily-briefing.plist`
+- [x] launchd plist at project root `com.thedubes.daily-briefing.plist`
+- [x] `scripts/install-briefing.sh` — copies plist to `~/Library/LaunchAgents/` + `launchctl load`
+- [x] `scripts/uninstall-briefing.sh` — `launchctl unload` + removes plist from LaunchAgents
 - [ ] `brew services start ollama` — ensure Ollama auto-starts at login
-- [ ] `launchctl load ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist`
+- [ ] `bash scripts/install-briefing.sh` — install and activate schedule
 - [ ] `launchctl start com.thedubes.daily-briefing` — trigger test run
 - [ ] Verify logs at `~/Library/Logs/macOSMCP/`
 

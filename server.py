@@ -23,7 +23,9 @@ import os
 from fastmcp import FastMCP
 
 from macos_mcp.calendar import register_tools as register_calendar_tools
+from macos_mcp.mail import register_tools as register_mail_tools
 from macos_mcp.messaging import register_tools as register_messaging_tools
+from macos_mcp.prompts import register_prompts
 from macos_mcp.reminders import register_tools as register_reminder_tools
 
 _log_level = getattr(logging, os.environ.get("MAC_BRIDGE_LOG_LEVEL", "WARNING").upper(), logging.WARNING)
@@ -36,12 +38,14 @@ logger = logging.getLogger("mac_bridge")
 mcp = FastMCP(
     name="mac-bridge",
     instructions=(
-        "Access to macOS Reminders, Calendar, and Messages via AppleScript. "
-        "Call list_reminders to see Reminder lists, list_calendars to see "
-        "calendars. Use get_reminders, search_reminders, get_overdue_reminders, "
-        "or get_upcoming_reminders for tasks; use get_calendar_events, "
-        "get_today_events, or search_calendar_events for calendar entries. "
-        "Use send_imessage to send an iMessage (e.g. a push alert to yourself)."
+        "Access to macOS Reminders, Calendar, Mail, and Messages via AppleScript. "
+        "Call list_reminders to see Reminder lists, list_calendars to see calendars, "
+        "list_mailboxes to see Mail accounts. Use get_reminders, search_reminders, "
+        "get_overdue_reminders, or get_upcoming_reminders for tasks; use "
+        "get_calendar_events, get_today_events, or search_calendar_events for "
+        "calendar entries; use get_unread_emails, search_emails, or get_email_detail "
+        "for mail. Use send_imessage to send an iMessage (e.g. a push alert to yourself). "
+        "Use the daily_planner or weekly_review prompts for structured overviews."
     ),
     on_duplicate="error",
 )
@@ -49,6 +53,8 @@ mcp = FastMCP(
 register_reminder_tools(mcp)
 register_calendar_tools(mcp)
 register_messaging_tools(mcp)
+register_mail_tools(mcp)
+register_prompts(mcp)
 
 if __name__ == "__main__":
     logger.info("Starting mac-bridge MCP server")

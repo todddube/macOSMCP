@@ -139,3 +139,52 @@ class SendMessageResult(TypedDict):
     message: str
 
 
+# ---------------------------------------------------------------------------
+# Mail
+# ---------------------------------------------------------------------------
+
+
+class MailboxInfo(TypedDict):
+    account: str
+    mailbox: str
+    unread: int
+
+
+class MailboxesResult(TypedDict):
+    mailboxes: list[MailboxInfo]
+    count: int
+
+
+class EmailItem(TypedDict, total=False):
+    id: str       # RFC 2822 Message-ID (e.g. <abc@mail.example.com>)
+    subject: str
+    sender: str
+    date: str
+    mailbox: str
+    account: str
+
+
+class EmailListResult(TypedDict):
+    emails: list[EmailItem]
+    count: int
+    mailbox: str
+    account: str
+
+
+class EmailSearchResult(TypedDict):
+    query: str
+    results: list[EmailItem]
+    count: int
+    mailbox: str
+
+
+class EmailDetailResult(TypedDict, total=False):
+    found: bool
+    id: str
+    subject: str
+    sender: str
+    date: str
+    mailbox: str
+    body: str    # full message body — always last in TSV output
+
+

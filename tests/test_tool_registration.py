@@ -10,20 +10,28 @@ import pytest
 from fastmcp import FastMCP
 
 from macos_mcp.calendar import register_tools as register_calendar_tools
+from macos_mcp.mail import register_tools as register_mail_tools
 from macos_mcp.reminders import register_tools as register_reminder_tools
 
 
 EXPECTED_TOOLS = {
+    # Reminders (6)
     "list_reminders",
     "get_reminders",
     "get_reminder_detail",
     "search_reminders",
     "get_overdue_reminders",
     "get_upcoming_reminders",
+    # Calendar (4)
     "list_calendars",
     "get_calendar_events",
     "get_today_events",
     "search_calendar_events",
+    # Mail (4)
+    "list_mailboxes",
+    "get_unread_emails",
+    "search_emails",
+    "get_email_detail",
 }
 
 
@@ -40,7 +48,7 @@ def tools_by_name(tool_list):
 
 
 class TestToolRegistration:
-    def test_all_10_tools_registered(self, tools_by_name):
+    def test_all_14_tools_registered(self, tools_by_name):
         assert set(tools_by_name.keys()) == EXPECTED_TOOLS
 
     def test_no_duplicate_registration(self):

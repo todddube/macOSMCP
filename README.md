@@ -1,8 +1,8 @@
 # mac-bridge
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server that bridges Claude to macOS native apps. Provides read-only access to Reminders and Calendar via Python + [`fastmcp`](https://gofastmcp.com). Reminders use AppleScript (`osascript`); Calendar event queries use a compiled Swift/EventKit helper for fast indexed lookups (<1s vs ~45s with AppleScript on large calendars). No Node/Bun runtime required.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server that bridges Claude to macOS native apps. Provides read-only access to Reminders and Calendar, plus iMessage send, via Python + [`fastmcp`](https://gofastmcp.com). Reminders use AppleScript (`osascript`); Calendar event queries use a compiled Swift/EventKit helper for fast indexed lookups (<1s vs ~45s with AppleScript on large calendars). No Node/Bun runtime required.
 
-**Mail support is planned for a future release.**
+**Mail support is planned (P2).**
 
 ---
 
@@ -28,7 +28,13 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that bridges
 | `get_today_events` | All events overlapping today | `calendar_name?` |
 | `search_calendar_events` | Title search within a rolling date window | `query`, `calendar_name?`, `days_back?`, `days_forward?`, `limit` |
 
-All tools return structured JSON. Only **read** operations are implemented.
+### Messaging
+
+| Tool | Description | Key Arguments |
+|---|---|---|
+| `send_imessage` | Send an iMessage via Messages.app | `recipient` (phone or Apple ID), `message` |
+
+All tools return structured JSON. All Reminders and Calendar tools are **read-only**. `send_imessage` is a write operation.
 
 > **Note:** Completed reminders are always excluded from all queries. The "Scheduled Reminders" virtual calendar is always excluded from calendar queries to avoid scanning reminder-derived entries.
 
@@ -44,27 +50,21 @@ Claude Code / Claude Desktop
   server.py              (FastMCP entry point)
         │
   macos_mcp/
-    applescript.py       (osascript subprocess helper)
+    applescript.py       (osascript subprocess helper + TTL cache + sanitization)
     models.py            (TypedDict return types → outputSchema)
-    reminders.py         (6 tools — batch AppleScript)
+    reminders.py         (6 tools — per-item AppleScript iteration)
     calendar.py          (4 tools — Swift/EventKit for events, AppleScript for list)
+    messaging.py         (1 tool — send_imessage via Messages.app AppleScript)
         │
         ├── subprocess → swift/calendar_helper  (EventKit, indexed queries, <1s)
-        └── subprocess → osascript              (Reminders + list_calendars only)
+        └── subprocess → osascript              (Reminders + list_calendars + send_imessage)
         ▼
-  macOS Reminders.app / Calendar.app
+  macOS Reminders.app / Calendar.app / Messages.app
 ```
 
 ### Performance
 
-**Reminders — Batch Property Fetching:** The server uses AppleScript batch property fetching to avoid the N × M IPC calls that cause timeouts on large lists. Each list is resolved with ~5 batch fetches regardless of item count, then pure-AppleScript loops handle filtering with zero additional round-trips:
-
-```applescript
--- One IPC call per property — not one per item
-set allNames  to name  of rems
-set allDates  to due date of rems
-set allBodies to body  of rems
-```
+**Reminders — Per-item iteration:** The server uses `repeat with r in (every reminder of list)` with per-item property access. AppleScript batch property fetching (`name of rems`) and indexed access (`item i of rems`) both fail on macOS with error -1728 or 17s+ hangs; per-item iteration via `repeat with r in` is reliable and fast enough for all list sizes. Completed reminders are filtered per-item rather than via a `whose` clause (which creates broken object refs when combined with iteration).
 
 **Calendar — Swift/EventKit:** Calendar event queries (`get_calendar_events`, `get_today_events`, `search_calendar_events`) use a compiled Swift CLI that calls EventKit's `predicateForEvents(withStart:end:calendars:)` for O(log N) indexed date lookups. This replaced AppleScript's `whose` clause which did O(N) linear scans over all historical events (~45s on calendars with 3,000+ events → <1s with EventKit). `list_calendars` still uses AppleScript (fast for metadata-only).
 
@@ -105,7 +105,7 @@ bash swift/build.sh
 ### 3. Verify the build
 
 ```bash
-# Run the test suite (81 tests, no macOS app access needed)
+# Run the test suite (90 tests, no macOS app access needed)
 uv run pytest tests/ -q
 
 # Verify Reminders access (macOS will prompt for permission — grant it)
@@ -140,7 +140,7 @@ Confirm the server is connected:
 /mcp
 ```
 
-You should see `mac-bridge` listed as connected with 10 tools.
+You should see `mac-bridge` listed as connected with 11 tools.
 
 **If your checkout is not at the default path**, edit `.mcp.json` and update the `--directory` value:
 
@@ -255,26 +255,32 @@ A permissions error will say `not authorized to send Apple events` (Reminders) o
 
 ```
 macOSMCP/
-├── server.py              ← MCP entry point
+├── server.py              ← MCP entry point (11 tools)
 ├── macos_mcp/
 │   ├── __init__.py
 │   ├── applescript.py     ← osascript helper + TTL cache + sanitization
 │   ├── models.py          ← TypedDict return types → FastMCP outputSchema
-│   ├── reminders.py       ← 6 Reminders tools (batch AppleScript)
-│   └── calendar.py        ← 4 Calendar tools (Swift/EventKit + AppleScript)
+│   ├── reminders.py       ← 6 Reminders tools (per-item AppleScript iteration)
+│   ├── calendar.py        ← 4 Calendar tools (Swift/EventKit + AppleScript)
+│   └── messaging.py       ← 1 Messaging tool (send_imessage via Messages.app)
 ├── swift/
 │   ├── calendar_helper.swift  ← EventKit CLI for fast event queries
 │   └── build.sh               ← compile script (swiftc → swift/calendar_helper)
-├── tests/                 ← 81 pytest tests
+├── scripts/
+│   ├── install-briefing.sh    ← copy plist to LaunchAgents + launchctl load
+│   └── uninstall-briefing.sh  ← launchctl unload + remove plist
+├── tests/                 ← 90 pytest tests
 │   ├── conftest.py
 │   ├── test_applescript.py
 │   ├── test_parsing.py
 │   ├── test_tool_registration.py
 │   ├── test_tools_mocked.py
 │   └── test_server.py
-├── pyproject.toml         ← uv/hatch project config (v0.5.0)
+├── scheduled_agent.py     ← Daily briefing agent (Ollama + Mail.app + iMessage)
+├── com.thedubes.daily-briefing.plist  ← launchd schedule (7:00 AM daily)
+├── pyproject.toml         ← uv/hatch project config (v0.5.1)
 ├── .mcp.json              ← Claude Code auto-discovery config
-└── macOSMCP_specs.md      ← design specs and implementation notes
+└── specs.md               ← design specs, roadmap, and implementation notes
 ```
 
 ---
@@ -318,28 +324,34 @@ macOSMCP/
 - [ ] `get_email_body(message_id)`
 
 ### Phase 5 — Scheduled Daily Briefing Agent
-- [x] Headless Python agent (`scheduled_agent.py`) runs via launchd at 7:00 AM
-- [x] Fetches calendar events + reminders via FastMCP Client
-- [x] Summarizes with local Ollama (`qwen3-fast:latest`) — zero cost, fully private
-- [x] Emails HTML briefing via Mail.app (no credentials needed)
-- [x] iMessage push alert alongside email
-- [ ] launchd schedule activated (see Daily Briefing Agent section below)
+- [x] `scheduled_agent.py` — fetches calendar + reminders + unread mail via MCP, generates HTML with Ollama, sends via Mail.app + iMessage
+- [x] Local Ollama (`qwen2.5:7b` default) — zero cost, fully private, no API key
+- [x] Professional HTML email — 6 sections with color-coded cards, priority badges, conflict highlighting, time-sensitive mail flagging
+- [x] Detailed iMessage nudge — today's events by time, overdue count, unread mail count
+- [x] `--dry-run` flag — prints HTML + iMessage preview, nothing sent
+- [x] launchd plist + `scripts/install-briefing.sh` / `uninstall-briefing.sh`
+- [x] `MAIL_COUNT` / `MAIL_MAILBOX` env vars — control mail inclusion; set `MAIL_COUNT=0` to disable
+- [ ] Dry-run tested and HTML output verified
+- [ ] Email delivery via Mail.app verified
+- [ ] launchd schedule activated (`bash scripts/install-briefing.sh`)
 
 ---
 
 ## Daily Briefing Agent
 
-`scheduled_agent.py` fetches today's calendar events and reminders via the MCP server, generates an HTML email summary using a local Ollama model, sends it via Mail.app, and fires an iMessage nudge — all with no cloud API calls.
+`scheduled_agent.py` fetches calendar events, reminders, and unread email via the MCP server, generates a professional HTML email summary using a local Ollama model, sends it via Mail.app, and fires a detailed iMessage nudge — all with no cloud API calls.
+
+The HTML email includes six sections: Today's Schedule, This Week, Overdue Reminders, Due This Week, Email Follow-up (with time-sensitive flagging), and a footer. The iMessage lists today's events by time plus counts for overdue items and unread email.
 
 ### Requirements
 
-- [Ollama](https://ollama.com) installed with `qwen3-fast:latest` pulled
+- [Ollama](https://ollama.com) installed with `qwen2.5:7b` pulled (or another model — see env vars below)
 - `uv sync --extra agent` run at least once
 
 ```bash
 # One-time setup
 brew install ollama
-ollama pull qwen3-fast:latest
+ollama pull qwen2.5:7b   # default model; swap via OLLAMA_MODEL env var
 uv sync --extra agent
 mkdir -p ~/Library/Logs/macOSMCP
 ```
@@ -366,8 +378,8 @@ tail -f ~/Library/Logs/macOSMCP/scheduled_agent.log
 # Ensure Ollama starts at login
 brew services start ollama
 
-# Load the schedule (plist is already in ~/Library/LaunchAgents/)
-launchctl load ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
+# Install and activate the schedule (copies plist to ~/Library/LaunchAgents/)
+bash scripts/install-briefing.sh
 
 # Trigger a test run immediately (check logs after)
 launchctl start com.thedubes.daily-briefing
@@ -375,8 +387,8 @@ launchctl start com.thedubes.daily-briefing
 # Verify it loaded and check last exit status
 launchctl list | grep daily-briefing
 
-# Unload if you want to disable it
-launchctl unload ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
+# Uninstall if you want to disable it
+bash scripts/uninstall-briefing.sh
 ```
 
 ### Environment variables
@@ -384,13 +396,15 @@ launchctl unload ~/Library/LaunchAgents/com.thedubes.daily-briefing.plist
 | Variable | Default | Description |
 |---|---|---|
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
-| `OLLAMA_MODEL` | `qwen3-fast:latest` | Model to use for summarization |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | Model for summarization (`qwen3-fast:latest`, `llama3.1:8b`, `llama3.2:latest` also work) |
 | `IMESSAGE_RECIPIENT` | `+18044328850` | Phone or Apple ID for push nudge |
+| `MAIL_COUNT` | `20` | Unread emails to include in briefing. Set `0` to disable mail entirely |
+| `MAIL_MAILBOX` | *(all inboxes)* | Restrict mail fetch to one mailbox name (e.g. `INBOX`) |
 
 Override at runtime:
 
 ```bash
-OLLAMA_MODEL=llama3:latest uv run --extra agent scheduled_agent.py --dry-run
+OLLAMA_MODEL=qwen3-fast:latest uv run --extra agent scheduled_agent.py --dry-run
 ```
 
 ---
