@@ -1,6 +1,132 @@
 # macOS MCP — Project Specs, Roadmap & Automation
 
-## Current State (v0.5.1)
+---
+
+## Multi-Agent Architecture (v0.6.0)
+
+### Overview
+
+Four autonomous Claude-powered agents replace the Ollama-based `scheduled_agent.py`.
+Each agent calls mac-bridge MCP tools itself via the Anthropic API tool-use loop —
+Claude decides what to fetch, reasons over the results, and acts conditionally.
+
+### Key upgrade: Ollama template fill → Claude tool-calling loop
+
+```
+BEFORE (v0.5.x — not agentic):
+  Python fetches data upfront → JSON blob → Ollama formats HTML
+
+AFTER (v0.6.0 — truly agentic):
+  Claude receives task → calls MCP tools iteratively → reasons → produces output
+                              ↑ haiku-4-5 (daily) / sonnet-4-6 (weekly)
+```
+
+### API Key Management (1Password → Keychain, never in plists)
+
+```
+install.py:   op read "op://Personal/Claude API Todd Secret/credential"
+                  → security add-generic-password -s mac-bridge -a ANTHROPIC_API_KEY
+agents/runner.py: security find-generic-password -s mac-bridge -a ANTHROPIC_API_KEY -w
+                  (no biometrics needed at launchd runtime)
+```
+
+### The Four Agents
+
+| Agent | File | Model | Schedule | Output |
+|---|---|---|---|---|
+| Morning Briefing | `agents/morning_briefing.py` | haiku-4-5 | 7:00 AM daily | HTML email + iMessage |
+| Weekly Review | `agents/weekly_review.py` | sonnet-4-6 | Sunday 5:00 PM | HTML email + iMessage |
+| Priority Alert | `agents/priority_alert.py` | haiku-4-5 | 11:30 AM + 4:30 PM | iMessage only (conditional) |
+| Evening Prep | `agents/evening_prep.py` | haiku-4-5 | 6:00 PM Mon–Fri | iMessage only (conditional) |
+
+### Cost Estimate
+
+| Agent | Model | Frequency | Est. tokens/run | Monthly |
+|---|---|---|---|---|
+| Morning briefing | haiku-4-5 | Daily | ~8K | ~$0.06 |
+| Weekly review | sonnet-4-6 | Weekly | ~20K | ~$0.15 |
+| Priority alert | haiku-4-5 | 2x daily | ~3K | ~$0.09 |
+| Evening prep | haiku-4-5 | 5x/week | ~3K | ~$0.06 |
+| **Total** | | | | **~$0.36/month** |
+
+### File Layout
+
+```
+agents/
+  __init__.py
+  runner.py            — shared: get_api_key, run_agent (tool loop), send_*, extract_*
+  morning_briefing.py  — 7:00 AM daily
+  weekly_review.py     — Sunday 5:00 PM
+  priority_alert.py    — 11:30 AM + 4:30 PM, conditional, rate-limited
+  evening_prep.py      — 6:00 PM Mon–Fri, conditional
+plists/
+  com.thedubes.morning-briefing.plist
+  com.thedubes.weekly-review.plist
+  com.thedubes.priority-alert.plist
+  com.thedubes.evening-prep.plist
+install.py             — Python installer: prereqs, deps, 1Password→Keychain, launchd
+```
+
+### Runner.py Core Pattern
+
+```python
+# 1. Load mac-bridge tools
+async with Client(MCP_CONFIG) as mcp:
+    tools = await mcp.list_tools()
+    anthropic_tools = [{"name": t.name, "description": t.description,
+                        "input_schema": t.inputSchema} for t in tools]
+
+# 2. Tool-calling loop
+messages = [{"role": "user", "content": task}]
+while True:
+    response = anthropic_client.messages.create(
+        model=model, tools=anthropic_tools, messages=messages
+    )
+    if response.stop_reason == "end_turn":
+        return final_text
+    # Execute tool calls, append results, continue loop
+```
+
+### Output Protocol
+
+Claude produces output in tagged sections:
+- `<html>…</html>` — full HTML email body (inline CSS, no wrappers)
+- `<imessage>…</imessage>` — ≤200 char iMessage push
+- `<alert>…</alert>` — ≤160 char conditional alert (priority_alert / evening_prep)
+- Empty `<alert></alert>` = silent run (nothing to report)
+
+### State File
+
+`~/.mac-bridge/agent_state.json` — rate-limiting for priority_alert:
+```json
+{
+  "alert_date": "2026-05-02",
+  "alerted_today": ["⚠️ Overdue: 'Call accountant'..."]
+}
+```
+
+### Install Commands
+
+```bash
+# Full install (pulls key from 1Password, installs all agents)
+uv run install.py
+
+# Status / dry-run / uninstall
+uv run install.py --status
+uv run install.py --dry-run
+uv run install.py --uninstall
+uv run install.py --refresh-key   # re-pull API key from 1Password
+
+# Manual test (any agent)
+uv run --extra agent agents/morning_briefing.py --dry-run
+uv run --extra agent agents/weekly_review.py --dry-run
+uv run --extra agent agents/priority_alert.py --dry-run
+uv run --extra agent agents/evening_prep.py --dry-run
+```
+
+---
+
+## Current State (v0.6.0)
 
 ### What's Built
 
@@ -11,7 +137,8 @@
 | Messaging | 1 tool (send_imessage) | Working, write |
 | Mail | 4 tools (list_mailboxes, get_unread_emails, search_emails, get_email_detail) | Working, read-only |
 | MCP Prompts | 2 prompts (daily_planner, weekly_review) | Working |
-| Daily Briefing Agent | `scheduled_agent.py` + launchd plist + install scripts | Built — dry-run / email / launchd activation pending |
+| Multi-Agent System | `agents/` (4 agents) + `plists/` (4 plists) + `install.py` | v0.6.0 — Claude API + 1Password + launchd |
+| Legacy Ollama Agent | `scheduled_agent.py` | Superseded by agents/ (kept for reference) |
 | Tests | 127 pytest tests (parsing, sanitization, registration, mocked integration, prompts) | Passing |
 
 ### Architecture
@@ -68,18 +195,20 @@ Claude Code / Claude Desktop
 - [x] **README updated** — reflects current tool set, exclusions, setup paths
 - [x] **`send_imessage` tool** — write operation via Messages.app AppleScript; returns `SendMessageResult`
 
-### P1 — In Progress / Up Next
+### P1 — Multi-Agent System (v0.6.0)
 
-- **Scheduled daily briefing agent** (`scheduled_agent.py` via launchd)
-  - [x] `scheduled_agent.py` built — Mail.app email + iMessage nudge + `--dry-run`
-  - [x] Ollama (`qwen2.5:7b` default; `qwen3-fast:latest` also supported) — zero cost, fully local
-  - [x] `<think>` tag stripping for qwen3 thinking models (regex in `generate_summary()`)
-  - [x] launchd plist at project root `com.thedubes.daily-briefing.plist` (7:00 AM daily)
-  - [x] `scripts/install-briefing.sh` / `uninstall-briefing.sh` — copy plist to LaunchAgents + load/unload
-  - [ ] **Next: dry-run test** — `uv run --extra agent scheduled_agent.py --dry-run`
-  - [ ] Verify HTML output quality; switch model via `OLLAMA_MODEL=` if needed
-  - [ ] Verify email arrives with correct formatting in Mail.app
-  - [ ] `brew services start ollama` → `bash scripts/install-briefing.sh` → activate schedule
+- **Truly agentic Claude API agents** replacing Ollama `scheduled_agent.py`
+  - [x] `agents/runner.py` — shared AgentRunner: 1Password→Keychain key fetch, MCP tool loop, email, iMessage, state
+  - [x] `agents/morning_briefing.py` — 7:00 AM daily, haiku-4-5, HTML email + iMessage
+  - [x] `agents/weekly_review.py` — Sunday 5 PM, sonnet-4-6, strategic review email + iMessage
+  - [x] `agents/priority_alert.py` — 11:30 AM + 4:30 PM, conditional iMessage, rate-limited via state file
+  - [x] `agents/evening_prep.py` — 6 PM Mon–Fri, conditional tomorrow preview iMessage
+  - [x] `plists/` — 4 launchd plists (no API key in env vars, pulled from Keychain at runtime)
+  - [x] `install.py` — Python installer: prereqs, uv sync, 1Password→Keychain, launchd load, dry-run validation
+  - [x] `pyproject.toml` — agent deps updated: `anthropic>=0.50.0` (replaced `ollama>=0.4.0`)
+  - [ ] **Next: run installer** — `uv run install.py`
+  - [ ] Dry-run each agent to validate Claude tool loop
+  - [ ] Activate launchd schedule and monitor first live runs
 
 ### P2 — New Features
 
@@ -618,6 +747,14 @@ OLLAMA_MODEL=llama3.1:8b uv run --extra agent scheduled_agent.py --dry-run
 ---
 
 ## Version History
+
+### v0.6.0
+- Multi-agent system: 4 Claude API-powered agents replacing Ollama `scheduled_agent.py`
+- `agents/runner.py` — shared AgentRunner with MCP tool-calling loop, 1Password→Keychain key management
+- `agents/morning_briefing.py`, `weekly_review.py`, `priority_alert.py`, `evening_prep.py`
+- `install.py` — Python installer (prereqs, uv sync, 1Password→Keychain, launchd)
+- `plists/` — 4 launchd plists with no secrets in EnvironmentVariables
+- `pyproject.toml` — `anthropic>=0.50.0` replaces `ollama>=0.4.0`
 
 ### v0.5.1
 - Added `send_imessage` tool via Messages.app AppleScript

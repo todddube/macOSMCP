@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.thedubes.weekly-review</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>--directory</string>
+        <string>/Users/todddube/Documents/Github/macOSMCP</string>
+        <string>--extra</string>
+        <string>agent</string>
+        <string>agents/weekly_review.py</string>
+    </array>
+
+    <!-- Sunday 5:00 PM (Weekday 0 = Sunday in launchd) -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key><integer>0</integer>
+        <key>Hour</key><integer>17</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>IMESSAGE_RECIPIENT</key><string>+18044328850</string>
+        <key>HOME</key><string>/Users/todddube</string>
+        <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/todddube/Library/Logs/macOSMCP/weekly-review-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/todddube/Library/Logs/macOSMCP/weekly-review-stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

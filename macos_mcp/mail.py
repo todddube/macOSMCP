@@ -144,7 +144,12 @@ end tell"""
 
 
 def _build_get_unread_all_inboxes_script(safe_acct: str | None, count: int) -> str:
-    """Fetch unread messages from all inbox-type mailboxes (across all or one account)."""
+    """Fetch unread messages from all inbox-type mailboxes (across all or one account).
+
+    Uses fully manual per-item iteration — no `whose` clauses — to avoid the
+    AppleScript -1700 coercion error that `whose mailbox type is inbox` and
+    `whose read status is false` trigger when the result set is small.
+    """
     if safe_acct:
         acct_iter = f'(every account whose name is "{safe_acct}")'
     else:
@@ -155,23 +160,17 @@ def _build_get_unread_all_inboxes_script(safe_acct: str | None, count: int) -> s
     set hitCount to 0
     repeat with a in {acct_iter}
         set acctName to name of a
-        repeat with mb in (every mailbox of a whose mailbox type is inbox)
-            set mbName to name of mb
-            set msgs to (every message of mb whose read status is false)
-            set totalCount to count of msgs
-            if totalCount > 0 then
-                set cap to {count} - hitCount
-                if totalCount < cap then set cap to totalCount
-                -- Batch fetch then loop over plain lists
-                set msgIds to message id of msgs
-                set subjects to subject of msgs
-                set senders to sender of msgs
-                set dates to date received of msgs
-                repeat with i from 1 to cap
-                    set mLine to "mailbox=" & mbName & tab & "account=" & acctName & tab & "id=" & (item i of msgIds) & tab & "sender=" & (item i of senders) & tab & "date=" & ((item i of dates) as string) & tab & "subject=" & (item i of subjects)
-                    set output to output & mLine & linefeed
-                    set hitCount to hitCount + 1
-                    if hitCount >= {count} then return output
+        repeat with mb in (every mailbox of a)
+            -- mailbox type property is unreliable — filter by name instead
+            set mbName to (name of mb) as string
+            if mbName is "INBOX" or mbName is "Inbox" or mbName is "inbox" then
+                repeat with m in (every message of mb)
+                    if read status of m is false then
+                        set mLine to "mailbox=" & mbName & tab & "account=" & acctName & tab & "id=" & (message id of m) & tab & "sender=" & (sender of m) & tab & "date=" & ((date received of m) as string) & tab & "subject=" & (subject of m)
+                        set output to output & mLine & linefeed
+                        set hitCount to hitCount + 1
+                        if hitCount >= {count} then return output
+                    end if
                 end repeat
             end if
         end repeat
