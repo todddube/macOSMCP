@@ -4,7 +4,7 @@ version = "0.5.1"
 description = "mac-bridge — MCP server bridging Claude to macOS Reminders, Calendar & iMessage"
 requires-python = ">=3.10"
 dependencies = [
-    "fastmcp>=3.1.1",
+    "fastmcp>=3.2.0",
 ]
 
 [project.scripts]
