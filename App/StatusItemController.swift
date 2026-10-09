@@ -223,13 +223,15 @@ final class StatusItemController: NSObject {
 
 /// The row of status dots under the bridge glyph: Claude Code, then Claude Desktop.
 ///
-/// Green means connected and working, yellow means something needs a look, and red
-/// means calls can't succeed. How a dot moves says the rest:
+/// Green means connected and working, yellow means not connected or something needs
+/// a look, and red means calls can't succeed. How a dot moves says the rest:
 ///
 /// - Green breathes slowly while idle and flashes quickly while traffic is crossing
 ///   the bridge, so a working session looks busy at a glance.
-/// - Yellow and red flash brightly, with a soft glow, so a problem with either
-///   client stands out in a crowded menu bar.
+/// - Steady yellow is standby: the client is installed but not connected, which is
+///   normal whenever it's closed, so it never flashes.
+/// - Flashing yellow or red, with a soft glow, is a real problem: a failed call,
+///   missing permissions or a bridge that's down. It stands out in a crowded menu bar.
 ///
 /// Under Reduce Motion the dots hold still and only their colour speaks. A client
 /// that isn't installed gets a faint ring, so the dot positions stay put.
@@ -314,7 +316,7 @@ final class StatusDotsView: NSView {
             dot.backgroundColor = nil
             dot.borderWidth = 0.75
             dot.borderColor = NSColor.tertiaryLabelColor.cgColor
-        case .good:
+        case .good, .standby:
             dot.backgroundColor = color(for: level).cgColor
             dot.borderWidth = 0
         case .warning, .problem:
@@ -337,10 +339,11 @@ final class StatusDotsView: NSView {
     ///
     /// The speeds are far enough apart to tell at a glance: a calm green breath about
     /// every three seconds while idle, a quick green flicker while traffic flows, and
-    /// a bright yellow or red flash about once a second for a problem.
+    /// a bright yellow or red flash about once a second for a problem. Standby holds
+    /// still.
     private static func animation(for level: ClientHealth.Level, busy: Bool) -> CAAnimation? {
         switch level {
-        case .absent:
+        case .absent, .standby:
             return nil
         case .good:
             return busy
@@ -369,7 +372,7 @@ final class StatusDotsView: NSView {
     static func color(for level: ClientHealth.Level) -> NSColor {
         switch level {
         case .good: return .systemGreen
-        case .warning: return .systemYellow
+        case .standby, .warning: return .systemYellow
         case .problem: return .systemRed
         case .absent: return .tertiaryLabelColor
         }

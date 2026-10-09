@@ -20,8 +20,11 @@ public struct ClientHealth: Sendable, Equatable {
     public enum Level: Sendable, Equatable {
         /// Connected and working.
         case good
-        /// Usable, but something needs a look: not connected right now, not set
-        /// up, partial permissions, or the last call failed.
+        /// Installed but not connected right now, set up or not. An ordinary state,
+        /// such as Claude Desktop being closed, so it is shown but never flashes.
+        case standby
+        /// Connected, but something needs a look: partial permissions, or the last
+        /// call failed.
         case warning
         /// Calls cannot succeed until something is fixed.
         case problem
@@ -85,9 +88,9 @@ public struct ClientHealth: Sendable, Equatable {
         case .pointsElsewhere:
             return ClientHealth(level: .problem, reason: "Configured for another copy")
         case .notConfigured:
-            return ClientHealth(level: .warning, reason: "Not set up")
+            return ClientHealth(level: .standby, reason: "Not set up")
         case .ready, .notInstalled, nil:
-            return ClientHealth(level: .warning, reason: "Set up — not connected")
+            return ClientHealth(level: .standby, reason: "Set up — not connected")
         }
     }
 }

@@ -61,15 +61,19 @@ struct ClientHealthTests {
         #expect(health(setup: .notConfigured, connected: true).level == .good)
     }
 
-    @Test func idleButConfiguredWarns() {
-        #expect(health(connected: false).level == .warning)
+    @Test func idleButConfiguredIsStandby() {
+        let result = health(connected: false)
+        #expect(result.level == .standby)
+        #expect(result.reason == "Set up — not connected")
     }
 
     @Test func idleAndPointingElsewhereIsAProblem() {
         #expect(health(setup: .pointsElsewhere("/tmp/other/macbridge"), connected: false).level == .problem)
     }
 
-    @Test func idleAndNotConfiguredWarns() {
-        #expect(health(setup: .notConfigured, connected: false).level == .warning)
+    @Test func idleAndNotConfiguredIsStandby() {
+        let result = health(setup: .notConfigured, connected: false)
+        #expect(result.level == .standby)
+        #expect(result.reason == "Not set up")
     }
 }

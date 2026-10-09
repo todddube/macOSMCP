@@ -171,8 +171,9 @@ final class BridgeTraffic: ObservableObject {
     ///
     /// Not a template image, because a template can't carry colour. The palette is
     /// resolved inside the drawing handler, which AppKit runs, and caches, once per
-    /// appearance it's drawn in, so the road follows a light or dark menu bar. Seen
-    /// working on a dark bar; a light-wallpaper-in-Dark-Mode bar is still to check.
+    /// appearance it's drawn in, so the road follows the menu bar's own appearance
+    /// rather than the system's: seen drawing a light road on a dark, wallpaper-tinted
+    /// bar while the system was in Light Mode.
     func menuBarImage(alert: Bool) -> NSImage {
         let snapshot = snapshot
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in

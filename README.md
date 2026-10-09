@@ -187,8 +187,9 @@ with CoreGraphics into `App/Assets.xcassets` (re-run with `make icons` after edi
   menu bar's light or dark text colour. Calls drive across it as coloured cars. A break in the
   deck shows missing permissions or a stopped bridge without opening the panel. Two dots underneath
   show Claude Code (left) and Claude Desktop (right). Green breathes slowly while idle and flashes
-  quickly while traffic flows. Yellow (needs a look) and red (calls can't succeed) flash brightly
-  with a glow. Under Reduce Motion the dots hold still.
+  quickly while traffic flows. Steady yellow means the client is installed but not connected, which
+  is normal while it's closed. Flashing yellow (a failed call or a missing permission) and flashing
+  red (calls can't succeed) mark real problems and glow. Under Reduce Motion the dots hold still.
 
 Generated rather than drawn in a design tool so the art is reviewable in a diff, reproducible, and
 tweakable without leaving the repo — the machine has no SVG converter and this needs none.
@@ -428,8 +429,9 @@ About window link to GitHub issue forms for bug reports and feature requests. `m
 same credits.
 
 The menu-bar bridge is now drawn in colour, and the status dots say more by how they move: green
-breathes while idle and flashes quickly while traffic is crossing, and yellow or red flashes
-brightly with a glow when Claude Code or Claude Desktop has a problem. The template menu-bar image
+breathes while idle and flashes quickly while traffic is crossing. Yellow or red flashes brightly
+with a glow only for a real problem with Claude Code or Claude Desktop. A client that is simply
+closed or not set up shows steady yellow. The template menu-bar image
 assets are gone, since the icon is drawn live.
 
 Removed the Apple Events entitlement and usage string, which were held in reserve for Mail and
