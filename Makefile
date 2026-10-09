@@ -33,7 +33,7 @@ help:
 	@echo "  make build     SwiftPM build of MacBridgeKit + the macbridge CLI"
 	@echo "  make test      Run the test suite (needs Xcode)"
 	@echo "  make project   Regenerate MacBridge.xcodeproj from project.yml"
-	@echo "  make icons     Redraw the app and menu-bar icons"
+	@echo "  make icons     Redraw the app icon"
 	@echo "  make signing   Detect a signing identity and write Signing.xcconfig"
 	@echo "  make app       Build MacBridge.app ($(CONFIG))"
 	@echo "  make install   Build and install to /Applications, then launch"
@@ -54,7 +54,7 @@ test:
 	@test -n "$(XCODE_DEV)" || { echo "Xcode is required for tests (swift-testing ships with Xcode, not CLT)."; exit 1; }
 	DEVELOPER_DIR=$(XCODE_DEV) $(XCSWIFT) test --scratch-path $(SCRATCH)
 
-# Redraw the app and menu-bar icons into App/Assets.xcassets.
+# Redraw the app icon into App/Assets.xcassets.
 # The artwork is code (Tools/generate-icons.swift), so edit that and re-run.
 icons:
 	swift Tools/generate-icons.swift

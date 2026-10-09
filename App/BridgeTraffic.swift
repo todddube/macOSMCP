@@ -23,8 +23,8 @@ import SwiftUI
 /// looks alive between calls rather than flashing one car at a time. Those ambient
 /// cars sit under the real ones, which still show kind and failure.
 ///
-/// The clock only runs while the bridge is busy, so an idle app costs nothing and
-/// the menu bar falls back to the static asset.
+/// The clock only runs while the bridge is busy, so an idle app costs nothing: the
+/// menu bar then shows one still frame of the bridge with no cars.
 @MainActor
 final class BridgeTraffic: ObservableObject {
 
@@ -166,25 +166,31 @@ final class BridgeTraffic: ObservableObject {
 
     // MARK: Rendering
 
-    /// The menu-bar frame: a template image, so macOS tints it like the static asset.
+    /// The menu-bar frame, in colour: orange towers and cables over a road in the
+    /// menu bar's own text colour, with the panel's coloured cars.
+    ///
+    /// Not a template image, because a template can't carry colour. The palette is
+    /// resolved inside the drawing handler, which AppKit runs, and caches, once per
+    /// appearance it's drawn in, so the road follows a light or dark menu bar. Seen
+    /// working on a dark bar; a light-wallpaper-in-Dark-Mode bar is still to check.
     func menuBarImage(alert: Bool) -> NSImage {
         let snapshot = snapshot
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
             guard let cg = NSGraphicsContext.current?.cgContext else { return false }
-            BridgeRenderer.draw(cg, in: rect, snapshot: snapshot, palette: .template, alert: alert)
+            BridgeRenderer.draw(cg, in: rect, snapshot: snapshot, palette: .menuBar, alert: alert)
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = false
         return image
     }
 }
 
 /// The bridge glyph's geometry, y-up.
 ///
-/// Mirrors `drawMenuBarIcon` in Tools/generate-icons.swift, so the animated frames
-/// line up with the static asset they replace; change the two together. Heights and
-/// stroke come from the rect's height, so a wider rect lengthens the span instead of
-/// stretching it — the panel's strip gets a long road with round cars.
+/// The app icon's suspension span (Tools/generate-icons.swift), simplified for 18pt,
+/// so the menu bar and the Dock read as one design. Heights and stroke come from the
+/// rect's height, so a wider rect lengthens the span instead of stretching it — the
+/// panel's strip gets a long road with round cars.
 struct BridgeGlyph {
     let box: CGRect
     let stroke: CGFloat
@@ -232,19 +238,23 @@ struct BridgeGlyph {
 
 /// Draws the bridge and its traffic into a CoreGraphics context.
 ///
-/// One renderer for both places: the menu bar gets black-with-alpha for a template
-/// image, the panel gets colour.
+/// One renderer for both places, each with its own palette: the menu bar's is tuned
+/// for an 18pt icon on a translucent bar, the panel's for its wider strip.
 enum BridgeRenderer {
 
     /// The colours and options for one destination.
     struct Palette {
+        /// The deck, which the cars drive along.
         var structure: CGColor
+        /// The two towers.
+        var towers: CGColor
+        /// The main cable and the side spans running down to the deck.
+        var cables: CGColor
         var read: CGColor
         var write: CGColor
         var destructive: CGColor
         var failed: CGColor
-        /// Template images cannot carry colour, so the node and the pulse take the
-        /// structure colour there; the panel can afford an accent.
+        /// The node and the ring it sends out when a client connects or leaves.
         var accent: CGColor
         /// The panel always shows the node; the menu bar only while it rings, since at
         /// 18pt a permanent node only thickens the cable.
@@ -252,14 +262,29 @@ enum BridgeRenderer {
         /// How strongly ambient cars draw, so real calls stand out from the traffic.
         var ambientAlpha: CGFloat
 
-        static let template = Palette(
-            structure: .black, read: .black, write: .black, destructive: .black,
-            failed: .black, accent: .black, showsNode: false, ambientAlpha: 0.75
-        )
+        /// The menu bar: a colourful bridge on a road that matches the menu bar's
+        /// text. Must be read while the status button's appearance is current, as
+        /// `menuBarImage(alert:)` does, or the road resolves for the wrong bar.
+        static var menuBar: Palette {
+            Palette(
+                structure: NSColor.labelColor.cgColor,
+                towers: NSColor.systemOrange.cgColor,
+                cables: NSColor.systemOrange.cgColor,
+                read: NSColor.systemBlue.cgColor,
+                write: NSColor.systemOrange.cgColor,
+                destructive: NSColor.systemRed.cgColor,
+                failed: NSColor.systemRed.cgColor,
+                accent: NSColor.systemGreen.cgColor,
+                showsNode: false,
+                ambientAlpha: 0.6
+            )
+        }
 
         static var panel: Palette {
             Palette(
                 structure: NSColor.secondaryLabelColor.cgColor,
+                towers: NSColor.systemOrange.cgColor,
+                cables: NSColor.systemOrange.cgColor,
                 read: NSColor.systemBlue.cgColor,
                 write: NSColor.systemOrange.cgColor,
                 destructive: NSColor.systemRed.cgColor,
@@ -298,7 +323,7 @@ enum BridgeRenderer {
     // MARK: Structure
 
     private static func drawStructure(_ cg: CGContext, glyph g: BridgeGlyph, palette: Palette, alert: Bool) {
-        cg.setStrokeColor(palette.structure)
+        cg.setStrokeColor(palette.cables)
         cg.setLineCap(.round)
         cg.setLineJoin(.round)
 
@@ -316,6 +341,7 @@ enum BridgeRenderer {
                         control: CGPoint(x: g.box.midX, y: g.controlY))
         cg.strokePath()
 
+        cg.setStrokeColor(palette.towers)
         cg.setLineWidth(g.stroke)
         for x in [g.towerLeftX, g.towerRightX] {
             cg.move(to: CGPoint(x: x, y: g.deckY))
@@ -323,6 +349,7 @@ enum BridgeRenderer {
             cg.strokePath()
         }
 
+        cg.setStrokeColor(palette.structure)
         cg.setLineWidth(g.stroke * 1.2)
         cg.move(to: CGPoint(x: g.box.minX, y: g.deckY))
         cg.addLine(to: CGPoint(x: g.box.maxX, y: g.deckY))

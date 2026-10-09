@@ -176,15 +176,19 @@ Use the **Grant…** buttons in the panel, which ask from a real user action.
 
 ### Icons
 
-The artwork is **code**, not checked-in binaries: `Tools/generate-icons.swift` draws it with
-CoreGraphics and writes `App/Assets.xcassets`. Re-run with `make icons` after editing the script.
+The artwork is **code**, not checked-in binaries. `Tools/generate-icons.swift` draws the app icon
+with CoreGraphics into `App/Assets.xcassets` (re-run with `make icons` after editing it), and
+`BridgeRenderer` in `App/BridgeTraffic.swift` draws the menu-bar icon live.
 
 - **App icon** — a Mac mini under a suspension bridge: the machine on one side, the assistant on
   the other, MacBridge as the span. Composed to survive 16px, where it reduces to a blue tile, a
   pale slab and a bright arc; the hangers, port and power LED appear only at 128px and up.
-- **Menu bar** — the same span as a template glyph, with a node on the cable for the AI half of
-  the metaphor. A second variant breaks the deck, so missing permissions or a stopped bridge are
-  visible in the menu bar rather than only once the panel is open.
+- **Menu bar** — the same span in colour: orange towers and cables over a road that follows the
+  menu bar's light or dark text colour. Calls drive across it as coloured cars. A break in the
+  deck shows missing permissions or a stopped bridge without opening the panel. Two dots underneath
+  show Claude Code (left) and Claude Desktop (right). Green breathes slowly while idle and flashes
+  quickly while traffic flows. Yellow (needs a look) and red (calls can't succeed) flash brightly
+  with a glow. Under Reduce Motion the dots hold still.
 
 Generated rather than drawn in a design tool so the art is reviewable in a diff, reproducible, and
 tweakable without leaving the repo — the machine has no SVG converter and this needs none.
@@ -381,6 +385,12 @@ Xcode over a beta.
   it needs a Developer ID Application certificate, which an Apple Development certificate cannot
   substitute for.
 
+## Feedback
+
+Found a bug or have an idea? [Open an issue](https://github.com/todddube/macOSMCP/issues/new/choose).
+The app links there too, from the menu-bar icon's right-click menu (**Report an Issue…** and
+**Request a Feature…**) and from **About MacBridge**.
+
 ## Acknowledgements
 
 MacBridge builds on these open-source packages, compiled into the binary:
@@ -413,8 +423,14 @@ and distribute, with no warranty. Every source file carries the copyright notice
 Released under the MIT License, with a copyright notice in every source file. Added
 `THIRD_PARTY_NOTICES.md` with the full license text of every package compiled into the binary,
 and bundled it and `LICENSE` into the app. The About window now shows the license, credits for
-each package with links, and a **Third-Party Licenses** button. `macbridge --help` ends with the
+each package with links, and a **Third-Party Licenses** button. The right-click menu and the
+About window link to GitHub issue forms for bug reports and feature requests. `macbridge --help` ends with the
 same credits.
+
+The menu-bar bridge is now drawn in colour, and the status dots say more by how they move: green
+breathes while idle and flashes quickly while traffic is crossing, and yellow or red flashes
+brightly with a glow when Claude Code or Claude Desktop has a problem. The template menu-bar image
+assets are gone, since the icon is drawn live.
 
 Removed the Apple Events entitlement and usage string, which were held in reserve for Mail and
 Messages support that is no longer planned. MacBridge now asks for Calendar and Reminders access and

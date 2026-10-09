@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an idea or improvement for MacBridge.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: The task or problem, in your own words. What are you trying to get your AI assistant to do?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How might MacBridge help?
+      description: A new tool, a change to an existing one, something in the menu bar app. Rough ideas are welcome.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you've tried instead?

@@ -2,7 +2,7 @@
 //  Credits.swift
 //  MacBridgeKit · MacBridge
 //
-//  Authorship, license and third-party credits, shown by the About window and the CLI.
+//  Authorship, license, links and third-party credits for the About window and the CLI.
 //
 //  Copyright © 2026 Todd Dube. Licensed under the MIT License; see LICENSE.
 //
@@ -36,6 +36,15 @@ public enum Credits {
     public static let repositoryURL = URL(string: "https://github.com/todddube/macOSMCP")!
     /// `LICENSE` on the repository's main branch.
     public static let licenseURL = URL(string: "https://github.com/todddube/macOSMCP/blob/main/LICENSE")!
+    /// The repository's issue list, for browsing what is already reported.
+    public static let issuesURL = URL(string: "https://github.com/todddube/macOSMCP/issues")!
+    /// The new-issue page, opened on the bug-report form.
+    ///
+    /// `template=` names the file in `.github/ISSUE_TEMPLATE`. Renaming that file breaks
+    /// this link without warning: GitHub shows a blank issue instead.
+    public static let bugReportURL = URL(string: "https://github.com/todddube/macOSMCP/issues/new?template=bug_report.yml")!
+    /// The new-issue page, opened on the feature-request form (see ``bugReportURL``).
+    public static let featureRequestURL = URL(string: "https://github.com/todddube/macOSMCP/issues/new?template=feature_request.yml")!
 
     /// An open-source component compiled into the MacBridge binary.
     public struct Component: Sendable, Identifiable {

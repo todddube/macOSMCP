@@ -25,3 +25,6 @@ Signing.xcconfig
 
 # Claude Code: per-machine settings stay local; shared standards are tracked.
 .claude/settings.local.json
+
+# Stray xcodebuild output from a run without -derivedDataPath.
+build/

@@ -63,35 +63,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// The menu-bar icon, in its own view so it can observe and react to state.
 ///
 /// Custom artwork rather than an SF Symbol: no stock symbol says "bridge", and the
-/// glyph should match the app icon. Both images are template assets, so macOS tints
-/// them for light, dark and highlighted menu bars.
-///
-/// While calls are in flight the static asset gives way to frames drawn by
-/// `BridgeTraffic` — cars crossing the span — and returns once the bridge is quiet.
+/// glyph should match the app icon. It is drawn by `BridgeRenderer` in colour, with
+/// orange towers and cables, and isn't a template image, so macOS shows it as drawn.
+/// While calls are in flight the frames animate cars crossing the span; once the
+/// bridge is quiet the clock stops and the last frame, an empty bridge, stays.
 struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
     /// Observed separately for the same reason as `MenuContent.log`: a nested
     /// ObservableObject does not republish through its parent.
     @ObservedObject var traffic: BridgeTraffic
-
     var body: some View {
-        if traffic.isActive {
-            Image(nsImage: traffic.menuBarImage(alert: imageName == "MenuBarBridgeAlert"))
-        } else {
-            Image(imageName)
-        }
+        // Labelled here because an NSImage-backed Image has no name for VoiceOver
+        // to read, and MenuBarExtra(content:label:) has no title of its own.
+        Image(nsImage: traffic.menuBarImage(alert: isAlert))
+            .renderingMode(.original)
+            .accessibilityLabel(isAlert ? "MacBridge, needs attention" : "MacBridge")
     }
 
-    private var imageName: String {
+    /// The broken-span variant distinguishes "up but unusable" from "up and
+    /// working" without opening the panel. Permissions are what actually block a
+    /// call, so they decide the icon.
+    private var isAlert: Bool {
         switch model.state {
         case .listening:
-            // The broken-span variant distinguishes "up but unusable" from "up and
-            // working" without opening the panel. Permissions are what actually
-            // block a call, so they decide the icon.
-            let granted = EventKitDomain.allCases.allSatisfy { model.hasAccess($0) }
-            return granted ? "MenuBarBridge" : "MenuBarBridgeAlert"
+            return !EventKitDomain.allCases.allSatisfy { model.hasAccess($0) }
         case .stopped, .failed:
-            return "MenuBarBridgeAlert"
+            return true
         }
     }
 }

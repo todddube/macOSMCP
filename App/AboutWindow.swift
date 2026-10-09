@@ -95,7 +95,15 @@ struct AboutView: View {
                 linkRow(symbol: "chevron.left.forwardslash.chevron.right", title: "Repository",
                         url: Credits.repositoryURL)
                 linkRow(symbol: "checkmark.seal", title: "License", url: Credits.licenseURL, label: Credits.license)
+                linkRow(symbol: "exclamationmark.bubble", title: "Feedback", url: Credits.issuesURL,
+                        label: "Issues & feature requests")
             }
+
+            HStack(spacing: 8) {
+                Button("Report an Issue…") { NSWorkspace.shared.open(Credits.bugReportURL) }
+                Button("Request a Feature…") { NSWorkspace.shared.open(Credits.featureRequestURL) }
+            }
+            .controlSize(.small)
 
             Divider()
 

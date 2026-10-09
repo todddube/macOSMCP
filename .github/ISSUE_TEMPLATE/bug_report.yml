@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in MacBridge isn't working as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please don't paste calendar or
+        reminder contents you'd rather keep private; a description is enough.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Ask Claude Code to …
+        2. …
+  - type: input
+    id: version
+    attributes:
+      label: MacBridge version
+      description: Shown in About MacBridge, or by `macbridge --help`.
+      placeholder: "0.7.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 15.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: AI client
+      options:
+        - Claude Code
+        - Claude Desktop
+        - Another MCP client
+        - Not client-specific
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Right-click the menu-bar icon → Copy Diagnostics, and paste here. Review it first and remove anything private.
+      render: text

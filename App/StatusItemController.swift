@@ -15,11 +15,9 @@ import MacBridgeKit
 /// status dots under the bridge glyph.
 ///
 /// SwiftUI owns the status item and gives no handle to it, so this finds the
-/// button in the status-bar window that SwiftUI created. The menu-bar icon stays a
-/// template image, so macOS keeps tinting it for light, dark and coloured
-/// menu bars, and the dots go in a separate layer-backed subview on top. Template
-/// images can't carry colour, and Core Animation pulses the dots without
-/// redrawing the icon on a timer.
+/// button in the status-bar window that SwiftUI created. The dots go in a separate
+/// layer-backed subview on top of the icon, so Core Animation can flash them without
+/// redrawing the icon on a timer, and they keep moving while the icon is still.
 @MainActor
 final class StatusItemController: NSObject {
 
@@ -51,7 +49,15 @@ final class StatusItemController: NSObject {
             .sink { [weak self] _ in self?.refresh() }
             .store(in: &subscriptions)
 
-        // Reduce Motion can change while the app runs; the dots stop pulsing then.
+        // Traffic switches the green dots between breathing and flashing. Only the
+        // busy flag, not every animation frame, so this fires twice per burst.
+        model.traffic.$isActive
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh() }
+            .store(in: &subscriptions)
+
+        // Reduce Motion can change while the app runs; the dots hold still then.
         NSWorkspace.shared.notificationCenter
             .publisher(for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)
             .receive(on: DispatchQueue.main)
@@ -130,7 +136,8 @@ final class StatusItemController: NSObject {
         let entries = model.clientHealth
         indicators?.update(
             levels: entries.map(\.health.level),
-            pulsing: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            busy: model.traffic.isActive,
+            animated: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         )
         let summary = entries
             .map { "\($0.client.name): \($0.health.reason)" }
@@ -186,6 +193,8 @@ final class StatusItemController: NSObject {
         if menu.items.count > 2 { menu.addItem(.separator()) }
 
         menu.addItem(item("About MacBridge", #selector(showAbout)))
+        menu.addItem(item("Report an Issue…", #selector(reportIssue)))
+        menu.addItem(item("Request a Feature…", #selector(requestFeature)))
         menu.addItem(.separator())
         menu.addItem(item("Copy Diagnostics", #selector(copyDiagnostics)))
         menu.addItem(item("Open Log", #selector(openLog)))
@@ -203,6 +212,8 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func showAbout() { AboutWindow.show() }
+    @objc private func reportIssue() { NSWorkspace.shared.open(Credits.bugReportURL) }
+    @objc private func requestFeature() { NSWorkspace.shared.open(Credits.featureRequestURL) }
     @objc private func copyDiagnostics() { model.copyDiagnostics() }
     @objc private func openLog() { model.openLog() }
     @objc private func restartBridge() { model.restartBridge() }
@@ -213,8 +224,15 @@ final class StatusItemController: NSObject {
 /// The row of status dots under the bridge glyph: Claude Code, then Claude Desktop.
 ///
 /// Green means connected and working, yellow means something needs a look, and red
-/// means calls can't succeed. The dots breathe slowly, unless Reduce Motion is on.
-/// A client that isn't installed gets a faint ring, so the dot positions stay put.
+/// means calls can't succeed. How a dot moves says the rest:
+///
+/// - Green breathes slowly while idle and flashes quickly while traffic is crossing
+///   the bridge, so a working session looks busy at a glance.
+/// - Yellow and red flash brightly, with a soft glow, so a problem with either
+///   client stands out in a crowded menu bar.
+///
+/// Under Reduce Motion the dots hold still and only their colour speaks. A client
+/// that isn't installed gets a faint ring, so the dot positions stay put.
 final class StatusDotsView: NSView {
 
     static let diameter: CGFloat = 4
@@ -223,7 +241,8 @@ final class StatusDotsView: NSView {
 
     private var dots: [CALayer] = []
     private var levels: [ClientHealth.Level] = []
-    private var pulsing = false
+    private var busy = false
+    private var animated = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -236,12 +255,19 @@ final class StatusDotsView: NSView {
     /// Decoration only: clicks go through to the status button.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    /// Show one dot per level. Layers are rebuilt only when something changed, so
-    /// frequent refreshes don't restart the pulse.
-    func update(levels: [ClientHealth.Level], pulsing: Bool) {
-        guard levels != self.levels || pulsing != self.pulsing else { return }
+    /// Show one dot per level.
+    ///
+    /// - Parameters:
+    ///   - busy: Traffic is crossing the bridge, so green dots flash rather than breathe.
+    ///   - animated: False under Reduce Motion, which stops every dot moving.
+    ///
+    /// Layers are rebuilt only when something changed, so frequent refreshes don't
+    /// restart the animations.
+    func update(levels: [ClientHealth.Level], busy: Bool, animated: Bool) {
+        guard levels != self.levels || busy != self.busy || animated != self.animated else { return }
         self.levels = levels
-        self.pulsing = pulsing
+        self.busy = busy
+        self.animated = animated
         rebuild()
     }
 
@@ -257,8 +283,8 @@ final class StatusDotsView: NSView {
             dot.bounds = CGRect(x: 0, y: 0, width: Self.diameter, height: Self.diameter)
             dot.cornerRadius = Self.diameter / 2
             Self.style(dot, for: level)
-            if pulsing && level != .absent {
-                dot.add(Self.pulseAnimation(), forKey: Self.pulseKey)
+            if animated, let animation = Self.animation(for: level, busy: busy) {
+                dot.add(animation, forKey: Self.pulseKey)
             }
             layer?.addSublayer(dot)
             return dot
@@ -288,19 +314,49 @@ final class StatusDotsView: NSView {
             dot.backgroundColor = nil
             dot.borderWidth = 0.75
             dot.borderColor = NSColor.tertiaryLabelColor.cgColor
-        default:
+        case .good:
             dot.backgroundColor = color(for: level).cgColor
             dot.borderWidth = 0
+        case .warning, .problem:
+            // A soft glow in the dot's own colour makes it read as lit, not just
+            // coloured, at 4pt.
+            dot.backgroundColor = color(for: level).cgColor
+            dot.borderWidth = 0
+            dot.shadowColor = color(for: level).cgColor
+            dot.shadowOpacity = 0.9
+            // Small enough that the halo isn't cut off by the bottom of the menu bar.
+            dot.shadowRadius = 1.5
+            dot.shadowOffset = .zero
+            // A fixed path, so the shadow isn't re-derived from alpha on every frame
+            // of the flash.
+            dot.shadowPath = CGPath(ellipseIn: dot.bounds, transform: nil)
         }
     }
 
-    /// A slow fade in and out, about one breath every three seconds. It's slow
-    /// enough that a green dot reads as alive, not as an alert.
-    private static func pulseAnimation() -> CAAnimation {
+    /// How a dot moves for its level, or nil for one that holds still.
+    ///
+    /// The speeds are far enough apart to tell at a glance: a calm green breath about
+    /// every three seconds while idle, a quick green flicker while traffic flows, and
+    /// a bright yellow or red flash about once a second for a problem.
+    private static func animation(for level: ClientHealth.Level, busy: Bool) -> CAAnimation? {
+        switch level {
+        case .absent:
+            return nil
+        case .good:
+            return busy
+                ? fade(to: 0.25, halfPeriod: 0.22)
+                : fade(to: 0.3, halfPeriod: 1.5)
+        case .warning, .problem:
+            return fade(to: 0.1, halfPeriod: 0.45)
+        }
+    }
+
+    /// Fade from full opacity down to `low` and back, forever.
+    private static func fade(to low: Float, halfPeriod: CFTimeInterval) -> CAAnimation {
         let animation = CABasicAnimation(keyPath: "opacity")
         animation.fromValue = 1.0
-        animation.toValue = 0.3
-        animation.duration = 1.5
+        animation.toValue = low
+        animation.duration = halfPeriod
         animation.autoreverses = true
         animation.repeatCount = .infinity
         animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)

@@ -3,8 +3,7 @@
 //  generate-icons.swift
 //  Tools · MacBridge
 //
-//  Draws the app icon and menu-bar icons with CoreGraphics and writes them into
-//  App/Assets.xcassets.
+//  Draws the app icon with CoreGraphics and writes it into App/Assets.xcassets.
 //
 //  Committed as code rather than as opaque binaries so the artwork is reviewable in
 //  a diff and tweakable without a design tool. No dependencies: no SVG converter or
@@ -242,99 +241,6 @@ func drawAppIcon(size: Int) -> CGContext {
     return context
 }
 
-// MARK: - Menu bar icon
-//
-// An "AI bridge": the same span, reduced to a glyph, with three nodes along the
-// cable standing in for the assistant side of the link.
-//
-// Template artwork, so it must be black-with-alpha only — macOS tints it for light,
-// dark and highlighted menu bars, and any colour here would be thrown away.
-
-/// The menu-bar template glyph at `size` pixels square; `alert` draws the variant
-/// shown when something needs attention.
-func drawMenuBarIcon(size: Int, alert: Bool) -> CGContext {
-    let context = makeContext(size: size)
-    let s = CGFloat(size)
-
-    // Menu-bar glyphs need breathing room or they look oversized next to Apple's.
-    let inset = s * 0.08
-    let box = CGRect(x: inset, y: inset, width: s - inset * 2, height: s - inset * 2)
-
-    // Light enough that the towers and cable stay separate shapes. A heavier stroke
-    // merged them into an illegible blob at 18pt.
-    let stroke = max(s * 0.062, 1)
-    context.setStrokeColor(.black)
-    context.setFillColor(.black)
-    context.setLineCap(.round)
-    context.setLineJoin(.round)
-
-    let deckY = box.minY + box.height * 0.34
-    let towerTop = box.maxY
-    let towerLeftX = box.minX + box.width * 0.27
-    let towerRightX = box.maxX - box.width * 0.27
-
-    // A shallow sag, not a deep one. Dropping the cable far between the towers left a
-    // V between two verticals, and the silhouette read as the letter M.
-    let sagBottom = deckY + (towerTop - deckY) * 0.66
-    let controlY = 2 * sagBottom - towerTop
-
-    context.setLineWidth(stroke * 0.9)
-
-    // Side cables sweeping from the deck ends up to the tower tops. These carry the
-    // recognisable suspension-bridge silhouette; without them it is just two posts.
-    for (endX, towerX) in [(box.minX, towerLeftX), (box.maxX, towerRightX)] {
-        let side = CGMutablePath()
-        side.move(to: CGPoint(x: endX, y: deckY))
-        side.addQuadCurve(
-            to: CGPoint(x: towerX, y: towerTop),
-            control: CGPoint(x: (endX + towerX) / 2, y: deckY + (towerTop - deckY) * 0.25)
-        )
-        context.addPath(side)
-        context.strokePath()
-    }
-
-    // Main span.
-    let cable = CGMutablePath()
-    cable.move(to: CGPoint(x: towerLeftX, y: towerTop))
-    cable.addQuadCurve(to: CGPoint(x: towerRightX, y: towerTop),
-                       control: CGPoint(x: box.midX, y: controlY))
-    context.addPath(cable)
-    context.strokePath()
-
-    // Towers: the two verticals that make it a suspension bridge rather than an arch.
-    context.setLineWidth(stroke)
-    for x in [towerLeftX, towerRightX] {
-        context.move(to: CGPoint(x: x, y: deckY))
-        context.addLine(to: CGPoint(x: x, y: towerTop))
-        context.strokePath()
-    }
-
-    // Deck, full width: the anchor line, and the one element that must survive at 1x.
-    context.setLineWidth(stroke * 1.2)
-    context.move(to: CGPoint(x: box.minX, y: deckY))
-    context.addLine(to: CGPoint(x: box.maxX, y: deckY))
-    context.strokePath()
-
-    // A single node at the centre of the span — the "AI" half of the metaphor, a link
-    // rather than just a crossing. Omitted at 1x, where it only thickens the cable.
-    if size >= 36 {
-        let nodeRadius = stroke * 0.78
-        context.fillEllipse(in: CGRect(x: box.midX - nodeRadius, y: sagBottom - nodeRadius,
-                                       width: nodeRadius * 2, height: nodeRadius * 2))
-    }
-
-    // The alert variant breaks the span, so "something is wrong" shows in the menu bar
-    // itself rather than only once the panel is open.
-    if alert {
-        context.setBlendMode(.clear)
-        context.fill(CGRect(x: box.midX - stroke * 1.3, y: deckY - stroke * 1.4,
-                            width: stroke * 2.6, height: stroke * 2.8))
-        context.setBlendMode(.normal)
-    }
-
-    return context
-}
-
 // MARK: - Asset catalog
 
 /// One entry per required macOS app-icon size, as `idiom: mac` expects.
@@ -375,44 +281,6 @@ func generateAppIcon() {
     print("  AppIcon.appiconset — \(appIconSizes.count) images")
 }
 
-/// Write a 1x/2x/3x template image set named `name`.
-func generateMenuBarIcon(named name: String, alert: Bool) {
-    let set = catalog.appendingPathComponent("\(name).imageset")
-    var images: [String] = []
-
-    // 18pt is the menu-bar convention; 1x/2x/3x covers every display.
-    for scale in 1...3 {
-        let pixels = 18 * scale
-        let filename = "\(name)\(scale > 1 ? "@\(scale)x" : "").png"
-        write(drawMenuBarIcon(size: pixels, alert: alert), to: set.appendingPathComponent(filename))
-        images.append("""
-                {
-                  "filename" : "\(filename)",
-                  "idiom" : "universal",
-                  "scale" : "\(scale)x"
-                }
-            """)
-    }
-
-    let contents = """
-        {
-          "images" : [
-        \(images.joined(separator: ",\n"))
-          ],
-          "info" : {
-            "author" : "generate-icons.swift",
-            "version" : 1
-          },
-          "properties" : {
-            "template-rendering-intent" : "template"
-          }
-        }
-        """
-    try! contents.write(to: set.appendingPathComponent("Contents.json"),
-                        atomically: true, encoding: .utf8)
-    print("  \(name).imageset — 3 images, template")
-}
-
 // MARK: - Main
 
 try? FileManager.default.createDirectory(at: catalog, withIntermediateDirectories: true)
@@ -427,6 +295,4 @@ try! """
 
 print("Generating icons into App/Assets.xcassets")
 generateAppIcon()
-generateMenuBarIcon(named: "MenuBarBridge", alert: false)
-generateMenuBarIcon(named: "MenuBarBridgeAlert", alert: true)
 print("Done.")
