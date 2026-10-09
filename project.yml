@@ -1,0 +1,256 @@
+# XcodeGen spec for MacBridge.xcodeproj.
+# Copyright © 2026 Todd Dube. Licensed under the MIT License; see LICENSE.
+#
+# The project file is generated from this spec rather than hand-edited: a
+# .pbxproj is miserable to review in a diff and merges badly, whereas this is
+# readable. Regenerate after changing targets or build settings:
+#
+#   make project      # xcodegen generate
+#
+# All the logic lives in the local SwiftPM package (MacBridgeKit), which both
+# targets depend on. That keeps `swift build` and `swift test` working from the
+# terminal while the Xcode project handles what SwiftPM cannot: the .app bundle,
+# Info.plist, entitlements, code signing and eventual notarization.
+
+name: MacBridge
+options:
+  bundleIdPrefix: com.thedubes
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+# Code signing lives in Signing.xcconfig, which `make project` generates by
+# detecting a signing identity on this machine. It is gitignored and machine-local,
+# because a certificate hash is not portable — and it is an xcconfig rather than a
+# setting here because anything under `settings` would take precedence over it.
+#
+# Why bother: TCC keys a permission grant to the app's code signature. An ad-hoc
+# signature has no identity beyond its own hash, which changes on every rebuild, so
+# each install silently revoked Calendar and Reminders. Signing with a real
+# certificate gives a designated requirement of bundle ID + certificate, and the
+# grant then survives rebuilds.
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.7.0"
+    CURRENT_PROJECT_VERSION: "7"
+    ENABLE_HARDENED_RUNTIME: YES
+    DEAD_CODE_STRIPPING: YES
+    CLANG_ENABLE_MODULES: YES
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+packages:
+  MacBridgeKit:
+    path: .
+  swift-sdk:
+    url: https://github.com/modelcontextprotocol/swift-sdk.git
+    from: 0.11.0
+
+targets:
+  # One target, one binary: MacBridge.app/Contents/MacOS/macbridge is both the
+  # menu-bar app and the CLI that MCP clients spawn, dispatched by App/main.swift.
+  #
+  # They cannot be two files. macOS filesystems are case-insensitive by default, so
+  # an app executable named "MacBridge" and a tool named "macbridge" occupy the same
+  # path and the second one copied destroys the first — which is exactly what
+  # happened when this was built as an app plus an embedded tool.
+  MacBridge:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes:
+          - Info.plist
+          - MacBridge.entitlements
+      # The CLI sources, minus their own entry point: App/main.swift is the entry
+      # point for this target and two top-level-code files would collide.
+      - path: Sources/macbridge
+        excludes:
+          - main.swift
+          - Info.plist
+      # Shipped in Contents/Resources: MIT and Apache-2.0 both require the license
+      # texts to travel with the binary, and About → Third-Party Licenses opens them.
+      - path: LICENSE
+        buildPhase: resources
+      - path: THIRD_PARTY_NOTICES.md
+        buildPhase: resources
+    dependencies:
+      - package: MacBridgeKit
+        product: MacBridgeKit
+    # Info.plist is GENERATED from these properties. Do not hand-edit App/Info.plist
+    # — `make project` overwrites it. This is the source of truth.
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: MacBridge
+        CFBundlePackageType: APPL
+        # Required for the compiled asset catalog's icon to be used.
+        CFBundleIconName: AppIcon
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The binary is `macbridge`, lowercase, so the path clients are pointed at
+        # reads naturally and matches the CLI's name.
+        CFBundleExecutable: macbridge
+        LSMinimumSystemVersion: "13.0"
+        NSHumanReadableCopyright: "Copyright © 2026 Todd Dube. Released under the MIT License."
+        # Menu-bar only: no Dock icon, no window at launch.
+        LSUIElement: true
+        # The strings macOS shows in the TCC prompt. Because every EventKit call
+        # happens in this process, the grant belongs to MacBridge rather than to
+        # whichever AI client spawned the shim.
+        NSCalendarsUsageDescription: MacBridge lets the AI assistants you connect read and manage your calendar events.
+        NSCalendarsFullAccessUsageDescription: MacBridge lets the AI assistants you connect read and manage your calendar events.
+        # Calendar has two access levels on macOS 14+, full and write-only, and the
+        # SDK appears to want both declared before it will prompt for either — an
+        # undeclared level makes requestFullAccessToEvents return silently with the
+        # status still "not determined". Reminders has no write-only level, which is
+        # why Reminders prompted and Calendar never did.
+        NSCalendarsWriteOnlyAccessUsageDescription: MacBridge lets the AI assistants you connect add events to your calendars.
+        NSRemindersUsageDescription: MacBridge lets the AI assistants you connect read and manage your reminders.
+        NSRemindersFullAccessUsageDescription: MacBridge lets the AI assistants you connect read and manage your reminders.
+        # Set for distribution; Finder and the App Store both read it.
+        LSApplicationCategoryType: public.app-category.productivity
+    # Entitlements are GENERATED from these properties, the same as Info.plist.
+    # Do not hand-edit App/MacBridge.entitlements — `make project` overwrites it with
+    # exactly what is listed here, and listing nothing produced an empty <dict/> that
+    # shipped for several commits.
+    entitlements:
+      path: App/MacBridge.entitlements
+      properties:
+        # Not sandboxed. EventKit would work in a sandbox, but the bridge socket lives
+        # in Application Support rather than a container so a shim, spawned by any AI
+        # client, can find it by a fixed path.
+        com.apple.security.app-sandbox: false
+        # REQUIRED under the hardened runtime — not sandbox-only, as I first assumed.
+        # Without the calendars entitlement, tccd logs
+        #   "Prompting policy for hardened runtime; service: kTCCServiceCalendar
+        #    requires entitlement com.apple.security.personal-information.calendars
+        #    but it is missing"
+        # and sets promptPolicy = 0, meaning it will never show a permission prompt.
+        # The request then returns immediately with the status still "not determined",
+        # with no prompt, no error and nothing in the app's own logs — which is exactly
+        # how this presented: clicking Grant appeared to do nothing at all.
+        com.apple.security.personal-information.calendars: true
+        com.apple.security.personal-information.reminders: true
+    settings:
+      configs:
+        Debug:
+          # A Debug build is a DIFFERENT app, and must say so.
+          #
+          # Every build in DerivedData used to claim com.thedubes.macbridge, so Launch
+          # Services ended up with several bundles asserting one identity. It then
+          # could not resolve the bundle at all — logging "bundleID: (null)" — and TCC
+          # responded by setting promptPolicy = 0, meaning "never prompt this app".
+          # That is why clicking Grant did nothing: macOS had quietly decided MacBridge
+          # was not allowed to ask.
+          #
+          # Separate identities also mean debug builds get their own TCC grants and
+          # cannot disturb the installed app's.
+          PRODUCT_BUNDLE_IDENTIFIER: com.thedubes.macbridge.debug
+          PRODUCT_NAME: MacBridge Debug
+        Release:
+          # Xcode injects com.apple.security.get-task-allow when signing with a
+          # development identity, which permits debugger attachment and is rejected by
+          # notarization. Release builds are what get installed and distributed.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thedubes.macbridge
+        # PRODUCT_NAME names the bundle (MacBridge.app); EXECUTABLE_NAME names the
+        # binary inside it, which is what clients invoke.
+        PRODUCT_NAME: MacBridge
+        EXECUTABLE_NAME: macbridge
+        # App/Assets.xcassets is picked up from the sources above; this names which
+        # set inside it is the app icon.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+
+  MacBridgeTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/MacBridgeKitTests
+    dependencies:
+      - package: MacBridgeKit
+        product: MacBridgeKit
+      - package: swift-sdk
+        product: MCP
+    settings:
+      configs:
+        Debug:
+          # A Debug build is a DIFFERENT app, and must say so.
+          #
+          # Every build in DerivedData used to claim com.thedubes.macbridge, so Launch
+          # Services ended up with several bundles asserting one identity. It then
+          # could not resolve the bundle at all — logging "bundleID: (null)" — and TCC
+          # responded by setting promptPolicy = 0, meaning "never prompt this app".
+          # That is why clicking Grant did nothing: macOS had quietly decided MacBridge
+          # was not allowed to ask.
+          #
+          # Separate identities also mean debug builds get their own TCC grants and
+          # cannot disturb the installed app's.
+          PRODUCT_BUNDLE_IDENTIFIER: com.thedubes.macbridge.debug
+          PRODUCT_NAME: MacBridge Debug
+        Release:
+          # Xcode injects com.apple.security.get-task-allow when signing with a
+          # development identity, which permits debugger attachment and is rejected by
+          # notarization. Release builds are what get installed and distributed.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thedubes.macbridge.tests
+        PRODUCT_NAME: MacBridgeTests
+        GENERATE_INFOPLIST_FILE: YES
+        # @testable import MacBridgeKit needs the module built for testing.
+        ENABLE_TESTABILITY: YES
+        SWIFT_VERSION: "5.0"
+
+schemes:
+  MacBridge:
+    build:
+      targets:
+        MacBridge: all
+      # ⌘B / ⌘R refresh the copy in /Applications — the one your MCP clients are
+      # configured for — so what you test is what they use.
+      #
+      # This matters more than convenience: TCC ties Calendar and Reminders grants to
+      # the app's identity AND path, so a DerivedData build is a different app with no
+      # permissions of its own.
+      #
+      # It deliberately does NOT launch the installed copy. Xcode launches the debug
+      # build for you (with the debugger attached), and a shim auto-launches the
+      # installed copy whenever a client next connects, so launching here would only
+      # give you two menu-bar icons. Because each bundle now listens on its own
+      # socket, the two can run side by side without competing.
+      postActions:
+        - script: |
+            set -e
+            SOURCE="$BUILT_PRODUCTS_DIR/$WRAPPER_NAME"
+            [ -d "$SOURCE" ] || exit 0
+
+            # Quit the installed copy so its bundle can be replaced safely; a client
+            # will start the new one again on its next call.
+            pkill -f "/Applications/MacBridge.app/Contents/MacOS/macbridge$" 2>/dev/null || true
+            sleep 0.3
+
+            rm -rf /Applications/MacBridge.app
+            ditto "$SOURCE" /Applications/MacBridge.app
+            echo "note: installed $(defaults read /Applications/MacBridge.app/Contents/Info CFBundleShortVersionString 2>/dev/null) to /Applications"
+          name: Install to /Applications
+          settingsTarget: MacBridge
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - MacBridgeTests
+      # The live suites stay off by default. Set MACBRIDGE_LIVE=1 here (or use
+      # `make verify`) to run the ones that touch real Calendar and Reminders data.
+      environmentVariables:
+        MACBRIDGE_LIVE:
+          value: "1"
+          isEnabled: false

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "macbridge": {
+      "type": "stdio",
+      "command": "/Applications/MacBridge.app/Contents/MacOS/macbridge",
+      "args": ["mcp"],
+      "env": {}
+    }
+  }
+}

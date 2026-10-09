@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.thedubes.macbridge.cli</string>
+	<key>CFBundleName</key>
+	<string>MacBridge</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<!-- TCC will not prompt a process with no usage description, and a SwiftPM
+	     executable has no bundle to carry one, so this plist is linked into the
+	     binary's __TEXT,__info_plist section. Only `mcp --direct` needs it: inside
+	     MacBridge.app the shim never touches EventKit, and the app bundle carries
+	     its own usage strings. -->
+	<key>NSCalendarsUsageDescription</key>
+	<string>MacBridge lets AI assistants you connect read and manage your calendar events.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>MacBridge lets AI assistants you connect read and manage your calendar events.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>MacBridge lets AI assistants you connect read and manage your reminders.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>MacBridge lets AI assistants you connect read and manage your reminders.</string>
+</dict>
+</plist>
