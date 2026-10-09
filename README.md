@@ -46,6 +46,26 @@ all-day events block their whole span.
 
 ## Install
 
+You don't need to build anything. Requires **macOS 13 or later**.
+
+1. **Download** `MacBridge-<version>.dmg` from the
+   [latest release](https://github.com/todddube/macOSMCP/releases/latest).
+2. **Open it and drag MacBridge onto Applications**, then open MacBridge from Applications. (If you
+   open it from somewhere else, it offers to move itself.) A bridge icon appears in the menu bar;
+   there's no Dock icon.
+3. **Click the bridge icon, then Grant** next to Calendars and Reminders.
+4. **Click Connect** next to Claude Desktop or Claude Code. For Claude Desktop, quit and reopen it
+   afterwards.
+
+That's it. Ask Claude something like *"what's on my calendar tomorrow?"* to try it. The dots under
+the menu-bar icon turn green when a client is connected.
+
+To remove MacBridge, quit it from the right-click menu, drag it from Applications to the Trash, and
+remove the `macbridge` entry from your Claude settings (`claude mcp remove --scope user macbridge`
+for Claude Code).
+
+### Build from source
+
 Requires **macOS 13+**, **Xcode 16+** (for the app bundle and the tests), and
 [xcodegen](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`.
 
@@ -69,7 +89,7 @@ MacBridge does nothing on its own — a client has to be told to run `macbridge 
 panel states where you are:
 
 ```
-  ● MacBridge 0.4.0                          18 tools
+  ● MacBridge 0.7.0                          18 tools
     Listening — 12 calls, 1 failed
 
   PERMISSIONS
@@ -79,8 +99,7 @@ panel states where you are:
   CLIENT SETUP                               Re-check
     ✓ Claude Code       connected to this app
     ○ Claude Desktop    not set up
-        Add this to its config, then restart it:
-        [Copy JSON]  [Reveal config]
+        [Connect Claude Desktop]        Manual setup ▾
 
   CONNECTED CLIENTS                                 1
     ● Claude Code                              pid 49823
@@ -102,8 +121,11 @@ It reads both clients' config files and compares the command they name against t
 binary — so a config left over from a `DerivedData` build shows as **wrong path** rather than
 looking fine and failing later. `macbridge doctor` prints the same information.
 
-If the `claude` CLI is not found, the panel offers the JSON route instead of showing you a command
-that will not run.
+**Connect** does the setup for you. For Claude Desktop it adds MacBridge to
+`claude_desktop_config.json`, keeping everything else in the file, and saves the original beside it
+as `claude_desktop_config.json.macbridge-backup` first. For Claude Code it runs
+`claude mcp add --scope user`. **Manual setup** still copies the command or the JSON, for anyone
+who would rather make the change themselves.
 
 ## Logs and diagnostics
 
@@ -208,25 +230,30 @@ Entitlements are **generated** from `project.yml` into `App/MacBridge.entitlemen
 Info.plist. Editing that file by hand does nothing; `make project` overwrites it. (It shipped as an
 empty `<dict/>` for several commits precisely because the properties were not declared here.)
 
-**To distribute to another Mac** you need a *Developer ID Application* certificate, which an Apple
-Development certificate cannot substitute for:
+**To make a release** for other Macs you need the paid Apple Developer Program and a *Developer ID
+Application* certificate, which an Apple Development certificate can't stand in for:
 
 1. Xcode → Settings → Accounts → sign in, select the team → **Manage Certificates → +** →
    Developer ID Application. Needs the Account Holder or Admin role.
 2. `xcrun notarytool store-credentials macbridge-notary --apple-id <id> --team-id <TEAMID>
    --password <app-specific-password>`
-3. `make signing` picks the new certificate up automatically — it prefers Developer ID over Apple
-   Development — then `make notarize` builds, submits, staples and verifies with `spctl`.
+3. `make release` runs the tests, builds with the Developer ID certificate (which `make signing` now
+   prefers over Apple Development), packs `MacBridge-<version>.dmg` with an Applications shortcut,
+   signs it, notarizes it, staples the ticket, and checks it the way Gatekeeper will.
+4. `make publish` uploads that DMG and its SHA-256 as a **draft** GitHub release tagged
+   `v<version>`, so you can review the notes before publishing.
 
-`make notarize` checks both prerequisites up front and tells you which is missing rather than
-failing somewhere inside `notarytool`.
+`make release` checks the certificate and the notary credentials up front and says which is
+missing, rather than failing somewhere inside `notarytool`. Switching from an Apple Development to a
+Developer ID signature changes the app's identity, so grant Calendar and Reminders once more after
+the first such install.
 
 ## Connect a client
 
 **Claude Code**
 
 ```bash
-claude mcp add macbridge -- /Applications/MacBridge.app/Contents/MacOS/macbridge mcp
+claude mcp add --scope user macbridge -- /Applications/MacBridge.app/Contents/MacOS/macbridge mcp
 ```
 
 **Claude Desktop** — in `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -236,7 +263,7 @@ claude mcp add macbridge -- /Applications/MacBridge.app/Contents/MacOS/macbridge
     "command": "/Applications/MacBridge.app/Contents/MacOS/macbridge", "args": ["mcp"] } } }
 ```
 
-The menu-bar panel copies either form to the clipboard. This repo's `.mcp.json` already points at
+Or click **Connect** in the menu-bar panel, which does this for you. This repo's `.mcp.json` already points at
 that path, so Claude Code picks it up when you open the project here.
 
 You do not need to start the app first: if a client spawns the shim while the app is closed, the
@@ -271,7 +298,8 @@ make icons      # redraw the app and menu-bar icons
 make doctor     # permissions, bridge status, tool inventory
 make tools      # list the tools
 make verify     # live write round-trip on a disposable list, then deletes it
-make notarize   # notarize and staple for distribution (needs a Developer ID)
+make release    # signed, notarized, stapled DMG for distribution (needs a Developer ID)
+make publish    # upload that DMG as a draft GitHub release
 make clean      # remove build directories
 ```
 
@@ -381,10 +409,9 @@ Xcode over a beta.
   everything, and the identity handed to it carries a kernel-verified pid rather than the
   self-reported name. The remaining work is a persisted store, the allow/deny UI on each client
   row, and a confirmation sheet for the three destructive tools.
-- **Writing client configs** from the app, instead of copying them to the clipboard.
-- **Notarization.** `make notarize` is written and checks its prerequisites, but has not been run:
-  it needs a Developer ID Application certificate, which an Apple Development certificate cannot
-  substitute for.
+- **First notarized release.** `make release` and `make publish` are ready, but haven't run yet: they
+  need the Developer ID certificate and notary credentials set up.
+- **Automatic updates.** New versions are downloaded from GitHub by hand for now.
 
 ## Feedback
 
@@ -427,6 +454,13 @@ and bundled it and `LICENSE` into the app. The About window now shows the licens
 each package with links, and a **Third-Party Licenses** button. The right-click menu and the
 About window link to GitHub issue forms for bug reports and feature requests. `macbridge --help` ends with the
 same credits.
+
+A download for people who won't build from source: `make release` produces a signed, notarized and
+stapled DMG, and `make publish` uploads it as a draft GitHub release. The panel's **Connect** button
+sets up Claude Desktop (merging its config file, with a backup) or Claude Code (`claude mcp add
+--scope user`) in one click. The Claude Code command the app suggested used to lack
+`--scope user`, so it registered MacBridge for one folder only. A copy launched from Downloads or
+the disk image offers to move itself to Applications. The README starts with a four-step install.
 
 The menu-bar bridge is now drawn live, with coloured cars, and the status dots say more by how
 they move: green breathes while connected and flashes quickly while traffic is crossing, and stays

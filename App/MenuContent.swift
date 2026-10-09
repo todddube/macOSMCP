@@ -206,7 +206,14 @@ struct MenuContent: View {
 
             switch client.status {
             case .ready:
-                EmptyView()
+                // Keep the "restart Claude Desktop" reminder visible after Connect,
+                // since the row flips to ready the moment the config is written.
+                if let result = model.setupResult, result.clientID == client.id, !result.isError {
+                    Text(result.message)
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
             case .notInstalled:
                 Text("Not installed on this Mac.")
@@ -232,48 +239,39 @@ struct MenuContent: View {
         }
     }
 
-    /// The two ways to add MacBridge to a client: the CLI command, or the JSON file.
+    /// One click to connect a client, with the copy-and-paste routes kept as a
+    /// fallback for when the click can't do it (no `claude` CLI, unreadable config).
     @ViewBuilder
     private func setupActions(for client: ClientSetup) -> some View {
-        if client.id == "claude-code" {
-            if model.claudeCLIPath != nil {
-                Text("Run this in a terminal:")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(model.claudeCodeCommand)
-                    .font(.system(size: 9, design: .monospaced))
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                HStack(spacing: 6) {
-                    Button("Copy command") { model.copyClaudeCodeCommand() }
-                        .controlSize(.small)
-                    Button("Copy JSON instead") { model.copyClientConfiguration() }
-                        .controlSize(.small)
-                }
-            } else {
-                // The `claude mcp add` route needs the CLI; without it, say so rather
-                // than showing a command that will not run.
-                Text("The claude CLI was not found, so add it to the config file instead:")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    Button("Copy JSON") { model.copyClientConfiguration() }
-                        .controlSize(.small)
-                    Button("Reveal config") { model.revealConfig(at: client.configPath) }
-                        .controlSize(.small)
-                }
+        let isRepair = client.status != .notConfigured
+        let isConnecting = model.connectingClientID == client.id
+        HStack(spacing: 6) {
+            Button(isRepair ? "Fix Connection" : "Connect \(client.name)") { model.connect(client) }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .disabled(isConnecting)
+            if isConnecting {
+                ProgressView().controlSize(.mini)
             }
-        } else {
-            Text("Add this to its config, then restart it:")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 6) {
+            Spacer()
+            Menu("Manual setup") {
+                if client.id == "claude-code" {
+                    Button("Copy Terminal Command") { model.copyClaudeCodeCommand() }
+                }
                 Button("Copy JSON") { model.copyClientConfiguration() }
-                    .controlSize(.small)
-                Button("Reveal config") { model.revealConfig(at: client.configPath) }
-                    .controlSize(.small)
+                Button("Reveal Config File") { model.revealConfig(at: client.configPath) }
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .font(.caption2)
+        }
+
+        if let result = model.setupResult, result.clientID == client.id {
+            Text(result.message)
+                .font(.caption2)
+                .foregroundStyle(result.isError ? .orange : .green)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
     }
 

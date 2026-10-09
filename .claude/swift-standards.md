@@ -69,7 +69,7 @@ Keep the year as the year of first publication; don't bump it per edit.
 - Logging goes through `BridgeLog`. Never log calendar/reminder contents at default level.
 - Tests that touch real Calendar/Reminders data belong in `LiveRoundTripTests` behind
   `MACBRIDGE_LIVE`.
-- Don't run `make install`, `make run`, `make notarize` or `make verify` during review.
+- Don't run `make install`, `make run`, `make release`, `make publish` or `make verify` during review.
 
 ## Project references
 

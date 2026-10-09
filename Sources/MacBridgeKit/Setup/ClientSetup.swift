@@ -92,13 +92,16 @@ public struct ClientSetup: Identifiable, Sendable {
     public static func status(forCommands commands: [String], shimPath: String) -> Status {
         if commands.contains(shimPath) { return .ready }
 
-        if let ours = commands.first(where: {
-            let name = ($0 as NSString).lastPathComponent
-            return name.caseInsensitiveCompare("macbridge") == .orderedSame
-        }) {
+        if let ours = commands.first(where: isMacBridgeCommand) {
             return .pointsElsewhere(ours)
         }
         return .notConfigured
+    }
+
+    /// Whether a configured command runs some copy of MacBridge, whatever the
+    /// server entry is called: its binary is named `macbridge`.
+    public static func isMacBridgeCommand(_ command: String) -> Bool {
+        (command as NSString).lastPathComponent.caseInsensitiveCompare("macbridge") == .orderedSame
     }
 
     // MARK: Helpers

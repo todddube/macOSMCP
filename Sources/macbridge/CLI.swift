@@ -56,7 +56,7 @@ func printUsage() {
           macbridge --help             Show this message
 
         CLIENT SETUP
-          Claude Code:     claude mcp add macbridge -- /Applications/MacBridge.app/Contents/MacOS/macbridge mcp
+          Claude Code:     claude mcp add --scope user macbridge -- /Applications/MacBridge.app/Contents/MacOS/macbridge mcp
           Claude Desktop:  add to claude_desktop_config.json:
             { "mcpServers": { "macbridge": {
                 "command": "/Applications/MacBridge.app/Contents/MacOS/macbridge", "args": ["mcp"] } } }
@@ -144,7 +144,7 @@ func runDoctor(requestAccess: Bool) async {
     if ClientSetup.detect(shimPath: shimPath).allSatisfy({ !$0.isReady }) {
         print("")
         print("  No client is pointed at MacBridge, so nothing can use it yet. Add it with:")
-        print("    claude mcp add macbridge -- \(shimPath) mcp")
+        print("    claude mcp add --scope user macbridge -- \(shimPath) mcp")
     }
 
     let definitions = ToolRegistry.definitions()

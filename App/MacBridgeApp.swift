@@ -50,8 +50,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var statusItem = StatusItemController(model: model)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        model.start()
-        statusItem.start()
+        // A copy run from Downloads or a disk image offers to move itself first. If
+        // it moves, the copy in /Applications takes over and this one quits without
+        // starting; otherwise launch carries on here.
+        InstallLocation.offerMoveIfNeeded { [self] in
+            model.start()
+            statusItem.start()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
