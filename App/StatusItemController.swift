@@ -223,13 +223,13 @@ final class StatusItemController: NSObject {
 
 /// The row of status dots under the bridge glyph: Claude Code, then Claude Desktop.
 ///
-/// Green means connected and working, yellow means not connected or something needs
-/// a look, and red means calls can't succeed. How a dot moves says the rest:
+/// Green means all is well, yellow means something needs a look, and red means calls
+/// can't succeed. How a dot moves says the rest:
 ///
-/// - Green breathes slowly while idle and flashes quickly while traffic is crossing
-///   the bridge, so a working session looks busy at a glance.
-/// - Steady yellow is standby: the client is installed but not connected, which is
-///   normal whenever it's closed, so it never flashes.
+/// - Green breathes slowly while connected and idle, and flashes quickly while
+///   traffic is crossing the bridge, so a working session looks busy at a glance.
+/// - Steady green is standby: the client is installed but not connected, which is
+///   normal whenever it's closed, set up for MacBridge or not.
 /// - Flashing yellow or red, with a soft glow, is a real problem: a failed call,
 ///   missing permissions or a bridge that's down. It stands out in a crowded menu bar.
 ///
@@ -371,8 +371,8 @@ final class StatusDotsView: NSView {
     /// The fill for a level, shared with the panel's dots so both read the same.
     static func color(for level: ClientHealth.Level) -> NSColor {
         switch level {
-        case .good: return .systemGreen
-        case .standby, .warning: return .systemYellow
+        case .good, .standby: return .systemGreen
+        case .warning: return .systemYellow
         case .problem: return .systemRed
         case .absent: return .tertiaryLabelColor
         }

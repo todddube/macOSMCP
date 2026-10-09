@@ -21,7 +21,8 @@ public struct ClientHealth: Sendable, Equatable {
         /// Connected and working.
         case good
         /// Installed but not connected right now, set up or not. An ordinary state,
-        /// such as Claude Desktop being closed, so it is shown but never flashes.
+        /// such as Claude Desktop being closed: shown green, since nothing is wrong,
+        /// but steady rather than breathing.
         case standby
         /// Connected, but something needs a look: partial permissions, or the last
         /// call failed.

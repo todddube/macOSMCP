@@ -63,8 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// The menu-bar icon, in its own view so it can observe and react to state.
 ///
 /// Custom artwork rather than an SF Symbol: no stock symbol says "bridge", and the
-/// glyph should match the app icon. It is drawn by `BridgeRenderer` in colour, with
-/// orange towers and cables, and isn't a template image, so macOS shows it as drawn.
+/// glyph should match the app icon. It is drawn by `BridgeRenderer` in the menu bar's
+/// text colour with coloured cars, and isn't a template image, so the cars keep
+/// their colour.
 /// While calls are in flight the frames animate cars crossing the span; once the
 /// bridge is quiet the clock stops and the last frame, an empty bridge, stays.
 struct MenuBarLabel: View {

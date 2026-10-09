@@ -183,13 +183,13 @@ with CoreGraphics into `App/Assets.xcassets` (re-run with `make icons` after edi
 - **App icon** — a Mac mini under a suspension bridge: the machine on one side, the assistant on
   the other, MacBridge as the span. Composed to survive 16px, where it reduces to a blue tile, a
   pale slab and a bright arc; the hangers, port and power LED appear only at 128px and up.
-- **Menu bar** — the same span in colour: orange towers and cables over a road that follows the
-  menu bar's light or dark text colour. Calls drive across it as coloured cars. A break in the
-  deck shows missing permissions or a stopped bridge without opening the panel. Two dots underneath
-  show Claude Code (left) and Claude Desktop (right). Green breathes slowly while idle and flashes
-  quickly while traffic flows. Steady yellow means the client is installed but not connected, which
-  is normal while it's closed. Flashing yellow (a failed call or a missing permission) and flashing
-  red (calls can't succeed) mark real problems and glow. Under Reduce Motion the dots hold still.
+- **Menu bar** — the same span, drawn in the menu bar's text colour (white on a dark bar), with
+  calls driving across it as coloured cars. A break in the deck shows missing permissions or a
+  stopped bridge without opening the panel. Two dots underneath show Claude Code (left) and Claude
+  Desktop (right). Green means all is well: steady while the client is closed or not yet set up,
+  a slow breath while it's connected, and a quick flash while traffic flows. Flashing yellow (a
+  failed call or a missing permission) and flashing red (calls can't succeed) mark real problems
+  and glow. Under Reduce Motion the dots hold still.
 
 Generated rather than drawn in a design tool so the art is reviewable in a diff, reproducible, and
 tweakable without leaving the repo — the machine has no SVG converter and this needs none.
@@ -428,11 +428,10 @@ each package with links, and a **Third-Party Licenses** button. The right-click 
 About window link to GitHub issue forms for bug reports and feature requests. `macbridge --help` ends with the
 same credits.
 
-The menu-bar bridge is now drawn in colour, and the status dots say more by how they move: green
-breathes while idle and flashes quickly while traffic is crossing. Yellow or red flashes brightly
-with a glow only for a real problem with Claude Code or Claude Desktop. A client that is simply
-closed or not set up shows steady yellow. The template menu-bar image
-assets are gone, since the icon is drawn live.
+The menu-bar bridge is now drawn live, with coloured cars, and the status dots say more by how
+they move: green breathes while connected and flashes quickly while traffic is crossing, and stays
+steady while a client is closed or not yet set up. Yellow or red flashes brightly with a glow only
+for a real problem with Claude Code or Claude Desktop. The template menu-bar image assets are gone.
 
 Removed the Apple Events entitlement and usage string, which were held in reserve for Mail and
 Messages support that is no longer planned. MacBridge now asks for Calendar and Reminders access and

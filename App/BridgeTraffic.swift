@@ -166,12 +166,12 @@ final class BridgeTraffic: ObservableObject {
 
     // MARK: Rendering
 
-    /// The menu-bar frame, in colour: orange towers and cables over a road in the
-    /// menu bar's own text colour, with the panel's coloured cars.
+    /// The menu-bar frame: the bridge in the menu bar's own text colour (white on a
+    /// dark bar), with the panel's coloured cars.
     ///
     /// Not a template image, because a template can't carry colour. The palette is
     /// resolved inside the drawing handler, which AppKit runs, and caches, once per
-    /// appearance it's drawn in, so the road follows the menu bar's own appearance
+    /// appearance it's drawn in, so the bridge follows the menu bar's own appearance
     /// rather than the system's: seen drawing a light road on a dark, wallpaper-tinted
     /// bar while the system was in Light Mode.
     func menuBarImage(alert: Bool) -> NSImage {
@@ -245,12 +245,8 @@ enum BridgeRenderer {
 
     /// The colours and options for one destination.
     struct Palette {
-        /// The deck, which the cars drive along.
+        /// The bridge itself: towers, cables and the deck the cars drive along.
         var structure: CGColor
-        /// The two towers.
-        var towers: CGColor
-        /// The main cable and the side spans running down to the deck.
-        var cables: CGColor
         var read: CGColor
         var write: CGColor
         var destructive: CGColor
@@ -263,14 +259,13 @@ enum BridgeRenderer {
         /// How strongly ambient cars draw, so real calls stand out from the traffic.
         var ambientAlpha: CGFloat
 
-        /// The menu bar: a colourful bridge on a road that matches the menu bar's
-        /// text. Must be read while the status button's appearance is current, as
-        /// `menuBarImage(alert:)` does, or the road resolves for the wrong bar.
+        /// The menu bar: the whole bridge in the menu bar's text colour, so it reads
+        /// white on a dark bar and black on a light one, with only the cars in colour.
+        /// Must be read while the status button's appearance is current, as
+        /// `menuBarImage(alert:)` does, or it resolves for the wrong bar.
         static var menuBar: Palette {
             Palette(
                 structure: NSColor.labelColor.cgColor,
-                towers: NSColor.systemOrange.cgColor,
-                cables: NSColor.systemOrange.cgColor,
                 read: NSColor.systemBlue.cgColor,
                 write: NSColor.systemOrange.cgColor,
                 destructive: NSColor.systemRed.cgColor,
@@ -284,8 +279,6 @@ enum BridgeRenderer {
         static var panel: Palette {
             Palette(
                 structure: NSColor.secondaryLabelColor.cgColor,
-                towers: NSColor.systemOrange.cgColor,
-                cables: NSColor.systemOrange.cgColor,
                 read: NSColor.systemBlue.cgColor,
                 write: NSColor.systemOrange.cgColor,
                 destructive: NSColor.systemRed.cgColor,
@@ -324,7 +317,7 @@ enum BridgeRenderer {
     // MARK: Structure
 
     private static func drawStructure(_ cg: CGContext, glyph g: BridgeGlyph, palette: Palette, alert: Bool) {
-        cg.setStrokeColor(palette.cables)
+        cg.setStrokeColor(palette.structure)
         cg.setLineCap(.round)
         cg.setLineJoin(.round)
 
@@ -342,7 +335,6 @@ enum BridgeRenderer {
                         control: CGPoint(x: g.box.midX, y: g.controlY))
         cg.strokePath()
 
-        cg.setStrokeColor(palette.towers)
         cg.setLineWidth(g.stroke)
         for x in [g.towerLeftX, g.towerRightX] {
             cg.move(to: CGPoint(x: x, y: g.deckY))
@@ -350,7 +342,6 @@ enum BridgeRenderer {
             cg.strokePath()
         }
 
-        cg.setStrokeColor(palette.structure)
         cg.setLineWidth(g.stroke * 1.2)
         cg.move(to: CGPoint(x: g.box.minX, y: g.deckY))
         cg.addLine(to: CGPoint(x: g.box.maxX, y: g.deckY))
