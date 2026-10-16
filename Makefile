@@ -72,6 +72,7 @@ icons:
 # is why this exists.
 signing:
 	@pick() { security find-identity -v -p codesigning 2>/dev/null | grep "\"$$1" | head -1; }; \
+	previous=$$(awk -F' = ' '/^CODE_SIGN_IDENTITY/{print $$2}' Config/Signing.local.xcconfig 2>/dev/null); \
 	line=$$(pick "Developer ID Application"); \
 	[ -n "$$line" ] || line=$$(pick "Apple Development"); \
 	identity=$$(echo "$$line" | awk '{print $$2}'); \
@@ -95,6 +96,13 @@ signing:
 		echo "signing: ad-hoc (no Developer ID or Apple Development certificate found)"; \
 		echo "  NOTE: an ad-hoc signature changes every rebuild, so macOS revokes"; \
 		echo "  Calendar and Reminders on each install. Re-grant from the panel."; \
+	fi; \
+	current=$${identity:--}; \
+	if [ -n "$$previous" ] && [ "$$previous" != "$$current" ]; then \
+		echo ""; \
+		echo "warning: the signing identity changed ($$previous -> $$current)."; \
+		echo "  TCC grants are tied to the certificate, so after the next install macOS"; \
+		echo "  will ask for Calendar and Reminders again. Grant them once from the panel."; \
 	fi
 
 # project.yml is the source of truth for targets, build settings AND Info.plist.

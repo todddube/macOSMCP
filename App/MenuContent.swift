@@ -39,8 +39,12 @@ struct MenuContent: View {
         }
         .padding(12)
         .frame(width: 380)
-        // Login items can be changed in System Settings while the panel is closed.
-        .onAppear { model.refreshLaunchAtLogin() }
+        // Permissions and login items can both change in System Settings while the
+        // panel is closed, so each opening re-reads them. Both reads are cheap.
+        .onAppear {
+            model.refreshPermissions()
+            model.refreshLaunchAtLogin()
+        }
     }
 
     // MARK: Header

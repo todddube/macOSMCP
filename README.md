@@ -498,6 +498,13 @@ so turning it off in System Settings → Login Items unticks it too, and it's of
 in Applications. The Xcode project is now checked in, with ad-hoc signing by default, so a fresh
 clone builds in Xcode with no xcodegen and no certificate; `make signing` writes the local override.
 
+Fixed **Grant** appearing to do nothing. After the prompt is allowed, EventKit in the running app
+could keep reporting "not yet requested" though macOS had recorded the grant, so the panel kept its
+Grant button and tool calls failed until a relaunch. The panel now trusts the request's own answer,
+and each tool call asks again on its own store while EventKit still lags. The panel also re-reads
+permissions each time it opens. `make signing` warns when the signing
+identity changes, since macOS then asks for Calendar and Reminders again.
+
 
 **0.7.0** — About window, right-click menu, client status dots, and traffic in the menu bar.
 Two dots under the bridge glyph show Claude Code (left) and Claude Desktop (right):

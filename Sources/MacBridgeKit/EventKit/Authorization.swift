@@ -26,10 +26,35 @@ public enum EventKitAuthorization {
         }
     }
 
-    /// The current grant for this process. Never prompts.
+    /// The current grant for this process, for display. Never prompts.
+    ///
+    /// Corrects one known lag: right after the user allows the prompt,
+    /// `EKEventStore.authorizationStatus(for:)` can go on reporting "not yet
+    /// requested" though tccd has recorded the grant. Seen on macOS 27: the panel
+    /// kept its Grant button until the app was relaunched. So a "yes" from this
+    /// process's own request stands in for that stale answer. Only `.notDetermined`
+    /// is overridden; a denial made later in System Settings still comes through.
+    ///
+    /// ``ensureAccess(to:store:)`` doesn't rely on this override: it asks again on
+    /// its own store, so a store is never used without having been granted.
     public static func status(for domain: EventKitDomain) -> EKAuthorizationStatus {
+        let reported = systemStatus(for: domain)
+        if reported == .notDetermined, grantedInThisProcess.contains(domain),
+           let granted = EKAuthorizationStatus(rawValue: 3) {
+            // Raw value 3 is .fullAccess on macOS 14+ and .authorized before it; see
+            // statusDescription(_:) for why the raw value rather than the case.
+            return granted
+        }
+        return reported
+    }
+
+    /// What EventKit itself reports, without the correction in ``status(for:)``.
+    private static func systemStatus(for domain: EventKitDomain) -> EKAuthorizationStatus {
         EKEventStore.authorizationStatus(for: entityType(for: domain))
     }
+
+    /// Domains a request in this process was told were granted. See ``status(for:)``.
+    private static let grantedInThisProcess = DomainSet()
 
     /// A short word for the current status, for error messages and `doctor`.
     ///
@@ -61,19 +86,38 @@ public enum EventKitAuthorization {
     ///
     /// Write-only access is treated as insufficient: every tool here reads back
     /// what it wrote so it can return the item's identifier.
+    ///
+    /// Decided on EventKit's own status, not the display override in
+    /// ``status(for:)``. While that still reads "not yet requested", the request is
+    /// made again on `store` every time. Once macOS has decided it returns at once,
+    /// with no prompt, and a `true` gives this store its own grant rather than
+    /// borrowing one made on another store. It also means a real reset
+    /// (`tccutil reset`) prompts again rather than being masked.
     public static func ensureAccess(to domain: EventKitDomain, store: EKEventStore) async throws {
-        var current = status(for: domain)
+        var current = systemStatus(for: domain)
         var requestError: String?
 
         if current == .notDetermined {
             do {
-                _ = try await requestAccess(to: domain, store: store)
+                let granted = try await requestAccess(to: domain, store: store)
+                // The returned Bool is the one thing that tells a lagging status
+                // apart from a real refusal, so it is logged (no user data).
+                BridgeLog.debug(
+                    "\(domain.displayName) request returned \(granted); status now "
+                        + statusDescription(systemStatus(for: domain)),
+                    category: .permissions
+                )
+                if granted {
+                    grantedInThisProcess.insert(domain)
+                    return
+                }
+                grantedInThisProcess.remove(domain)
             } catch {
                 // Swallowing this was hiding the actual reason a prompt never
                 // appeared, which is the single most confusing failure to debug.
                 requestError = error.localizedDescription
             }
-            current = status(for: domain)
+            current = systemStatus(for: domain)
         }
 
         guard hasFullAccess(current) else {
@@ -94,5 +138,26 @@ public enum EventKitAuthorization {
         } else {
             return try await store.requestAccess(to: entityType(for: domain))
         }
+    }
+}
+
+/// A lock-guarded set of domains, shared by every EKEventStore user in the process.
+private final class DomainSet: @unchecked Sendable {
+    private let lock = NSLock()
+    private var domains: Set<EventKitDomain> = []
+
+    func insert(_ domain: EventKitDomain) {
+        lock.lock(); defer { lock.unlock() }
+        domains.insert(domain)
+    }
+
+    func remove(_ domain: EventKitDomain) {
+        lock.lock(); defer { lock.unlock() }
+        domains.remove(domain)
+    }
+
+    func contains(_ domain: EventKitDomain) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return domains.contains(domain)
     }
 }
