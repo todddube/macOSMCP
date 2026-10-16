@@ -51,6 +51,20 @@ struct InstallPolicyTests {
         #expect(!offers("/Users/someone/Downloads/MacBridge.app", suppressed: true))
     }
 
+    @Test("Open-at-login is offered only for a copy in an Applications folder")
+    func installedForLoginItem() {
+        func installed(_ path: String, resolved: String? = nil) -> Bool {
+            InstallPolicy.isInstalled(bundlePath: path, resolvedPath: resolved ?? path, homeDirectory: home)
+        }
+        #expect(installed("/Applications/MacBridge.app"))
+        #expect(installed("/Users/someone/Applications/MacBridge.app"))
+        #expect(installed("/Applications/MacBridge.app", resolved: "/Users/someone/dev/MacBridge.app"))
+        #expect(!installed("/tmp/DerivedData/Build/Products/Debug/MacBridge Debug.app"))
+        #expect(!installed("/Volumes/MacBridge 0.7.0/MacBridge.app"))
+        // A prefix match on the folder, not the bare word.
+        #expect(!installed("/ApplicationsOld/MacBridge.app"))
+    }
+
     @Test("Only a plain copy outside /Applications may be trashed")
     func trashRules() {
         let dest = "/Applications/MacBridge.app"

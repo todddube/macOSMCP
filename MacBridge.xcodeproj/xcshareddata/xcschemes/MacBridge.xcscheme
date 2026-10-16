@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "1430"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES"
+      runPostActionsOnFailure = "NO">
+      <PostActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Install to /Applications"
+               scriptText = "set -e&#10;SOURCE=&quot;$BUILT_PRODUCTS_DIR/$WRAPPER_NAME&quot;&#10;[ -d &quot;$SOURCE&quot; ] || exit 0&#10;&#10;# Quit the installed copy so its bundle can be replaced safely; a client&#10;# will start the new one again on its next call.&#10;pkill -f &quot;/Applications/MacBridge.app/Contents/MacOS/macbridge$&quot; 2&gt;/dev/null || true&#10;sleep 0.3&#10;&#10;rm -rf /Applications/MacBridge.app&#10;ditto &quot;$SOURCE&quot; /Applications/MacBridge.app&#10;echo &quot;note: installed $(defaults read /Applications/MacBridge.app/Contents/Info CFBundleShortVersionString 2&gt;/dev/null) to /Applications&quot;&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "CFA0103E283A0B033CF5E38D"
+                     BuildableName = "MacBridge.app"
+                     BlueprintName = "MacBridge"
+                     ReferencedContainer = "container:MacBridge.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PostActions>
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "CFA0103E283A0B033CF5E38D"
+               BuildableName = "MacBridge.app"
+               BlueprintName = "MacBridge"
+               ReferencedContainer = "container:MacBridge.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "NO"
+      onlyGenerateCoverageForSpecifiedTargets = "NO">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "CFA0103E283A0B033CF5E38D"
+            BuildableName = "MacBridge.app"
+            BlueprintName = "MacBridge"
+            ReferencedContainer = "container:MacBridge.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "10C945C1F507FB4B740FF84E"
+               BuildableName = "MacBridgeTests.xctest"
+               BlueprintName = "MacBridgeTests"
+               ReferencedContainer = "container:MacBridge.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "MACBRIDGE_LIVE"
+            value = "[&quot;value&quot;: &quot;1&quot;, &quot;isEnabled&quot;: false]"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "CFA0103E283A0B033CF5E38D"
+            BuildableName = "MacBridge.app"
+            BlueprintName = "MacBridge"
+            ReferencedContainer = "container:MacBridge.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "CFA0103E283A0B033CF5E38D"
+            BuildableName = "MacBridge.app"
+            BlueprintName = "MacBridge"
+            ReferencedContainer = "container:MacBridge.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>

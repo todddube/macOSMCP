@@ -33,11 +33,19 @@ public enum InstallPolicy {
         suppressed: Bool
     ) -> Bool {
         guard !suppressed, !bundleIdentifier.hasSuffix(".debug") else { return false }
+        return !isInstalled(bundlePath: bundlePath, resolvedPath: resolvedPath, homeDirectory: homeDirectory)
+    }
+
+    /// Whether a bundle lives in `/Applications` or `~/Applications`, by either its
+    /// launched or its symlink-resolved path.
+    ///
+    /// Also gates "Open at login": a login item points at a location, so it's only
+    /// offered for a copy that will stay where it is.
+    public static func isInstalled(bundlePath: String, resolvedPath: String, homeDirectory: String) -> Bool {
         let folders = ["/Applications/", homeDirectory + "/Applications/"]
-        let installed = [bundlePath, resolvedPath].contains { path in
+        return [bundlePath, resolvedPath].contains { path in
             folders.contains { path.hasPrefix($0) }
         }
-        return !installed
     }
 
     /// Whether the original may go to the Trash once copied into /Applications.

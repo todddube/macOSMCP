@@ -1,0 +1,603 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		09599BD39ECBF3995BC7776F /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19154988827E1D08A5FF959F /* main.swift */; };
+		250B5E9B481DB4C6E8197A19 /* MacBridgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E79A56723642F92C03C71381 /* MacBridgeApp.swift */; };
+		2C98349D2A041CA1C5B4406D /* LiveRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3118D1CDD76034BFE293515 /* LiveRoundTripTests.swift */; };
+		35A36B78D3A9AC112EB76502 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4E53990546A9077D95BDA7 /* AppModel.swift */; };
+		3BCD61E59FC1CC8AFAB51632 /* InstallPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B69DCB6D96A18B355C8FA9 /* InstallPolicyTests.swift */; };
+		3E0718FBCC0E5713BD934322 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 942C5263D7278DFE72490E39 /* LaunchAtLogin.swift */; };
+		3FEAB9F716AEE0D37F8AB85F /* BridgeTraffic.swift in Sources */ = {isa = PBXBuildFile; fileRef = B97ADADD5EDC39DA13E14978 /* BridgeTraffic.swift */; };
+		4AB8B7E42C5187CA855E9D30 /* THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = 500A2590E04999D01B05D6A7 /* THIRD_PARTY_NOTICES.md */; };
+		667C0CB8781647A636806DA1 /* Backend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897763EBA436F41B77C20203 /* Backend.swift */; };
+		688298292770B378385050F1 /* MenuContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90FE346036BC1626BACB813F /* MenuContent.swift */; };
+		6DA7E1ACA4220CB7A0863A3D /* ToolInventoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E280CB79D30268261DBDE8F2 /* ToolInventoryTests.swift */; };
+		7389540F0A9F1831117060C8 /* InstallLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D38C6B831BBBE75566E61EC /* InstallLocation.swift */; };
+		74FA26949C8CF8BBD28208DA /* VersionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F8E4CD1E00BBC0356FEE19 /* VersionTests.swift */; };
+		7B0CCDEF827574E71EBC3745 /* AboutWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9954D23E419C53E05D9635C /* AboutWindow.swift */; };
+		7C5D6893A02D575E40EF2610 /* ClientConfigWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB8B91F7FA1C3D5EFCDC3E1 /* ClientConfigWriterTests.swift */; };
+		7D548523B82766DAA7F72AFA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2FA83CD15573E2DDC7E9649E /* Assets.xcassets */; };
+		81C4C8B636A82C759A0FD78E /* MacBridgeKit in Frameworks */ = {isa = PBXBuildFile; productRef = D61556B02A12D8F0FF4BDAD1 /* MacBridgeKit */; };
+		92D13C419D87FE51787D144A /* ClientHealthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C18A5CBFD9EF7E29A105FC34 /* ClientHealthTests.swift */; };
+		9587E97CCC8A5482E5B2D42C /* ClientSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4E6FD2BB43463B7AECAC2E /* ClientSetupTests.swift */; };
+		C05D6E3C0D3A2CDEDDBF328E /* ArgumentsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54509C7F2ADB53F3683EC52E /* ArgumentsTests.swift */; };
+		CC99876DDE9DA8A76034E523 /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = 0742D77118B4EDB34EE5EC60 /* MCP */; };
+		CCF586578BE8DF61517CFAD6 /* FreeBusyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E758FDE3EB14801BC4D7E557 /* FreeBusyTests.swift */; };
+		CDF83BD4B98EA0430D1B7AA7 /* MacBridgeKit in Frameworks */ = {isa = PBXBuildFile; productRef = 46B2EDF87F266BE596721B27 /* MacBridgeKit */; };
+		D518EB1341FF6098A7F79BD3 /* DateParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA34387776788B690BCA193 /* DateParsingTests.swift */; };
+		D8E5FBB5B9E9C1DF3527D91C /* BridgeIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE021AF26DC12CB161DCF01E /* BridgeIdentityTests.swift */; };
+		F0B7270B563718A8BAC828B1 /* CLI.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D12608BF14E215CC7F7798 /* CLI.swift */; };
+		F31F903FB80FF98096FF5AB8 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90EEE13E77D450A622C439F2 /* StatusItemController.swift */; };
+		F3F61CB95C5E1CA1CF68B7C7 /* ActivityLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FBECD1AC649B352C5B7C83 /* ActivityLog.swift */; };
+		F5638BF32536DE2D06BA978D /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 0811CE0BDD2E1D9BF7B62130 /* LICENSE */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0319B384DAA51CCDF0C566C4 /* MacBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0811CE0BDD2E1D9BF7B62130 /* LICENSE */ = {isa = PBXFileReference; path = LICENSE; sourceTree = "<group>"; };
+		19154988827E1D08A5FF959F /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		19F85B5CDC39F549E8AF9F4D /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		19F8E4CD1E00BBC0356FEE19 /* VersionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionTests.swift; sourceTree = "<group>"; };
+		2FA83CD15573E2DDC7E9649E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		3E4E6FD2BB43463B7AECAC2E /* ClientSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientSetupTests.swift; sourceTree = "<group>"; };
+		500A2590E04999D01B05D6A7 /* THIRD_PARTY_NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD_PARTY_NOTICES.md; sourceTree = "<group>"; };
+		54509C7F2ADB53F3683EC52E /* ArgumentsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgumentsTests.swift; sourceTree = "<group>"; };
+		7AB6CF91EE247BC0B7D25AAE /* macOSMCP */ = {isa = PBXFileReference; lastKnownFileType = folder; name = macOSMCP; path = .; sourceTree = SOURCE_ROOT; };
+		897763EBA436F41B77C20203 /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
+		90EEE13E77D450A622C439F2 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
+		90FE346036BC1626BACB813F /* MenuContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContent.swift; sourceTree = "<group>"; };
+		942C5263D7278DFE72490E39 /* LaunchAtLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLogin.swift; sourceTree = "<group>"; };
+		9D38C6B831BBBE75566E61EC /* InstallLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallLocation.swift; sourceTree = "<group>"; };
+		9DA34387776788B690BCA193 /* DateParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParsingTests.swift; sourceTree = "<group>"; };
+		9DFC4C03F783DEF3EAF48911 /* MacBridgeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacBridgeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AD4E53990546A9077D95BDA7 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		B97ADADD5EDC39DA13E14978 /* BridgeTraffic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeTraffic.swift; sourceTree = "<group>"; };
+		C18A5CBFD9EF7E29A105FC34 /* ClientHealthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientHealthTests.swift; sourceTree = "<group>"; };
+		C5D12608BF14E215CC7F7798 /* CLI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLI.swift; sourceTree = "<group>"; };
+		CFB8B91F7FA1C3D5EFCDC3E1 /* ClientConfigWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientConfigWriterTests.swift; sourceTree = "<group>"; };
+		D9954D23E419C53E05D9635C /* AboutWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutWindow.swift; sourceTree = "<group>"; };
+		E280CB79D30268261DBDE8F2 /* ToolInventoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolInventoryTests.swift; sourceTree = "<group>"; };
+		E5B69DCB6D96A18B355C8FA9 /* InstallPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallPolicyTests.swift; sourceTree = "<group>"; };
+		E6FBECD1AC649B352C5B7C83 /* ActivityLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLog.swift; sourceTree = "<group>"; };
+		E758FDE3EB14801BC4D7E557 /* FreeBusyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeBusyTests.swift; sourceTree = "<group>"; };
+		E79A56723642F92C03C71381 /* MacBridgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBridgeApp.swift; sourceTree = "<group>"; };
+		EE021AF26DC12CB161DCF01E /* BridgeIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeIdentityTests.swift; sourceTree = "<group>"; };
+		F3118D1CDD76034BFE293515 /* LiveRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRoundTripTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		31CCC4B4FA1B2F6AA2D91C4D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				81C4C8B636A82C759A0FD78E /* MacBridgeKit in Frameworks */,
+				CC99876DDE9DA8A76034E523 /* MCP in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D767CEBEC9880BA639323AE2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CDF83BD4B98EA0430D1B7AA7 /* MacBridgeKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2C73CE9ADFD1FE9091619942 = {
+			isa = PBXGroup;
+			children = (
+				9F87ECC53ADA8568568EBA7F /* App */,
+				D56C03760E1BCB2D07568D1B /* Config */,
+				FB8EB257D6D8D40C09A07273 /* Packages */,
+				BE79FB1688F1CDF7C6CE1564 /* Sources */,
+				E34AA774CBB6869568BE82D3 /* Tests */,
+				0811CE0BDD2E1D9BF7B62130 /* LICENSE */,
+				500A2590E04999D01B05D6A7 /* THIRD_PARTY_NOTICES.md */,
+				5CC847B2EE095821180870CD /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5CC847B2EE095821180870CD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0319B384DAA51CCDF0C566C4 /* MacBridge.app */,
+				9DFC4C03F783DEF3EAF48911 /* MacBridgeTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9F87ECC53ADA8568568EBA7F /* App */ = {
+			isa = PBXGroup;
+			children = (
+				D9954D23E419C53E05D9635C /* AboutWindow.swift */,
+				E6FBECD1AC649B352C5B7C83 /* ActivityLog.swift */,
+				AD4E53990546A9077D95BDA7 /* AppModel.swift */,
+				2FA83CD15573E2DDC7E9649E /* Assets.xcassets */,
+				B97ADADD5EDC39DA13E14978 /* BridgeTraffic.swift */,
+				9D38C6B831BBBE75566E61EC /* InstallLocation.swift */,
+				942C5263D7278DFE72490E39 /* LaunchAtLogin.swift */,
+				E79A56723642F92C03C71381 /* MacBridgeApp.swift */,
+				19154988827E1D08A5FF959F /* main.swift */,
+				90FE346036BC1626BACB813F /* MenuContent.swift */,
+				90EEE13E77D450A622C439F2 /* StatusItemController.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A7F20A28620BF51108F9EFA7 /* MacBridgeKitTests */ = {
+			isa = PBXGroup;
+			children = (
+				54509C7F2ADB53F3683EC52E /* ArgumentsTests.swift */,
+				EE021AF26DC12CB161DCF01E /* BridgeIdentityTests.swift */,
+				CFB8B91F7FA1C3D5EFCDC3E1 /* ClientConfigWriterTests.swift */,
+				C18A5CBFD9EF7E29A105FC34 /* ClientHealthTests.swift */,
+				3E4E6FD2BB43463B7AECAC2E /* ClientSetupTests.swift */,
+				9DA34387776788B690BCA193 /* DateParsingTests.swift */,
+				E758FDE3EB14801BC4D7E557 /* FreeBusyTests.swift */,
+				E5B69DCB6D96A18B355C8FA9 /* InstallPolicyTests.swift */,
+				F3118D1CDD76034BFE293515 /* LiveRoundTripTests.swift */,
+				E280CB79D30268261DBDE8F2 /* ToolInventoryTests.swift */,
+				19F8E4CD1E00BBC0356FEE19 /* VersionTests.swift */,
+			);
+			path = MacBridgeKitTests;
+			sourceTree = "<group>";
+		};
+		B01667499E2D12CFCF9941F3 /* macbridge */ = {
+			isa = PBXGroup;
+			children = (
+				897763EBA436F41B77C20203 /* Backend.swift */,
+				C5D12608BF14E215CC7F7798 /* CLI.swift */,
+			);
+			path = macbridge;
+			sourceTree = "<group>";
+		};
+		BE79FB1688F1CDF7C6CE1564 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				B01667499E2D12CFCF9941F3 /* macbridge */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		D56C03760E1BCB2D07568D1B /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				19F85B5CDC39F549E8AF9F4D /* Signing.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		E34AA774CBB6869568BE82D3 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				A7F20A28620BF51108F9EFA7 /* MacBridgeKitTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		FB8EB257D6D8D40C09A07273 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				7AB6CF91EE247BC0B7D25AAE /* macOSMCP */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		10C945C1F507FB4B740FF84E /* MacBridgeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5863BCAAA7D24F9A96699A47 /* Build configuration list for PBXNativeTarget "MacBridgeTests" */;
+			buildPhases = (
+				427054BA6FDB953E44A51402 /* Sources */,
+				31CCC4B4FA1B2F6AA2D91C4D /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MacBridgeTests;
+			packageProductDependencies = (
+				D61556B02A12D8F0FF4BDAD1 /* MacBridgeKit */,
+				0742D77118B4EDB34EE5EC60 /* MCP */,
+			);
+			productName = MacBridgeTests;
+			productReference = 9DFC4C03F783DEF3EAF48911 /* MacBridgeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CFA0103E283A0B033CF5E38D /* MacBridge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5D3D15426BDA9C9B65789AD5 /* Build configuration list for PBXNativeTarget "MacBridge" */;
+			buildPhases = (
+				57CCB9C95641E02395FB2ED9 /* Sources */,
+				89A3458418A57709208B5FAF /* Resources */,
+				D767CEBEC9880BA639323AE2 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MacBridge;
+			packageProductDependencies = (
+				46B2EDF87F266BE596721B27 /* MacBridgeKit */,
+			);
+			productName = MacBridge;
+			productReference = 0319B384DAA51CCDF0C566C4 /* MacBridge.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		12F5BE7927CCA3994B7D363A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					10C945C1F507FB4B740FF84E = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					CFA0103E283A0B033CF5E38D = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 1955B10219F6C976255D68C4 /* Build configuration list for PBXProject "MacBridge" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2C73CE9ADFD1FE9091619942;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				11729DF75B594112A6A3E9EA /* XCRemoteSwiftPackageReference "swift-sdk" */,
+				CEE49192586285053D409760 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5CC847B2EE095821180870CD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CFA0103E283A0B033CF5E38D /* MacBridge */,
+				10C945C1F507FB4B740FF84E /* MacBridgeTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		89A3458418A57709208B5FAF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7D548523B82766DAA7F72AFA /* Assets.xcassets in Resources */,
+				F5638BF32536DE2D06BA978D /* LICENSE in Resources */,
+				4AB8B7E42C5187CA855E9D30 /* THIRD_PARTY_NOTICES.md in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		427054BA6FDB953E44A51402 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C05D6E3C0D3A2CDEDDBF328E /* ArgumentsTests.swift in Sources */,
+				D8E5FBB5B9E9C1DF3527D91C /* BridgeIdentityTests.swift in Sources */,
+				7C5D6893A02D575E40EF2610 /* ClientConfigWriterTests.swift in Sources */,
+				92D13C419D87FE51787D144A /* ClientHealthTests.swift in Sources */,
+				9587E97CCC8A5482E5B2D42C /* ClientSetupTests.swift in Sources */,
+				D518EB1341FF6098A7F79BD3 /* DateParsingTests.swift in Sources */,
+				CCF586578BE8DF61517CFAD6 /* FreeBusyTests.swift in Sources */,
+				3BCD61E59FC1CC8AFAB51632 /* InstallPolicyTests.swift in Sources */,
+				2C98349D2A041CA1C5B4406D /* LiveRoundTripTests.swift in Sources */,
+				6DA7E1ACA4220CB7A0863A3D /* ToolInventoryTests.swift in Sources */,
+				74FA26949C8CF8BBD28208DA /* VersionTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		57CCB9C95641E02395FB2ED9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7B0CCDEF827574E71EBC3745 /* AboutWindow.swift in Sources */,
+				F3F61CB95C5E1CA1CF68B7C7 /* ActivityLog.swift in Sources */,
+				35A36B78D3A9AC112EB76502 /* AppModel.swift in Sources */,
+				667C0CB8781647A636806DA1 /* Backend.swift in Sources */,
+				3FEAB9F716AEE0D37F8AB85F /* BridgeTraffic.swift in Sources */,
+				F0B7270B563718A8BAC828B1 /* CLI.swift in Sources */,
+				7389540F0A9F1831117060C8 /* InstallLocation.swift in Sources */,
+				3E0718FBCC0E5713BD934322 /* LaunchAtLogin.swift in Sources */,
+				250B5E9B481DB4C6E8197A19 /* MacBridgeApp.swift in Sources */,
+				688298292770B378385050F1 /* MenuContent.swift in Sources */,
+				F31F903FB80FF98096FF5AB8 /* StatusItemController.swift in Sources */,
+				09599BD39ECBF3995BC7776F /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		6D0BBA841D609B46DC9624F7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 19F85B5CDC39F549E8AF9F4D /* Signing.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 7;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.7.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		71F4AB222BFE92F77BAEF034 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.thedubes.macbridge.debug;
+				PRODUCT_NAME = "MacBridge Debug";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		77AE16785A076A67C6BD71DE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.thedubes.macbridge.tests;
+				PRODUCT_NAME = MacBridgeTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		9770EE39A81750BBF51C7C0C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/MacBridge.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				EXECUTABLE_NAME = macbridge;
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.thedubes.macbridge.debug;
+				PRODUCT_NAME = "MacBridge Debug";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		B2909DC22E3ABA0666CDE18A /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 19F85B5CDC39F549E8AF9F4D /* Signing.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 7;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.7.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		BB472135940784C2C2540014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/MacBridge.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				EXECUTABLE_NAME = macbridge;
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.thedubes.macbridge;
+				PRODUCT_NAME = MacBridge;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1955B10219F6C976255D68C4 /* Build configuration list for PBXProject "MacBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6D0BBA841D609B46DC9624F7 /* Debug */,
+				B2909DC22E3ABA0666CDE18A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5863BCAAA7D24F9A96699A47 /* Build configuration list for PBXNativeTarget "MacBridgeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				71F4AB222BFE92F77BAEF034 /* Debug */,
+				77AE16785A076A67C6BD71DE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5D3D15426BDA9C9B65789AD5 /* Build configuration list for PBXNativeTarget "MacBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9770EE39A81750BBF51C7C0C /* Debug */,
+				BB472135940784C2C2540014 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		CEE49192586285053D409760 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		11729DF75B594112A6A3E9EA /* XCRemoteSwiftPackageReference "swift-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/modelcontextprotocol/swift-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.11.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0742D77118B4EDB34EE5EC60 /* MCP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 11729DF75B594112A6A3E9EA /* XCRemoteSwiftPackageReference "swift-sdk" */;
+			productName = MCP;
+		};
+		46B2EDF87F266BE596721B27 /* MacBridgeKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MacBridgeKit;
+		};
+		D61556B02A12D8F0FF4BDAD1 /* MacBridgeKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MacBridgeKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 12F5BE7927CCA3994B7D363A /* Project object */;
+}

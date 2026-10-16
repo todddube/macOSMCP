@@ -3,7 +3,9 @@
 #
 # The project file is generated from this spec rather than hand-edited: a
 # .pbxproj is miserable to review in a diff and merges badly, whereas this is
-# readable. Regenerate after changing targets or build settings:
+# readable. Regenerate after changing targets or build settings, and commit the
+# regenerated MacBridge.xcodeproj and App/Info.plist alongside this file — they are
+# checked in so a fresh clone opens and builds in Xcode without xcodegen:
 #
 #   make project      # xcodegen generate
 #
@@ -20,10 +22,15 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
 
-# Code signing lives in Signing.xcconfig, which `make project` generates by
-# detecting a signing identity on this machine. It is gitignored and machine-local,
-# because a certificate hash is not portable — and it is an xcconfig rather than a
-# setting here because anything under `settings` would take precedence over it.
+# Code signing lives in Config/Signing.xcconfig rather than under `settings`, because
+# anything there would take precedence over it. The tracked file signs ad-hoc, so a
+# fresh clone builds with no certificate, and optionally includes the gitignored
+# Signing.local.xcconfig that `make signing` writes from a certificate on this Mac —
+# a certificate hash is machine-local, so that part can't be committed.
+#
+# It is in Config/ rather than the repo root on purpose: xcodegen gives a root-level
+# config file a random TEMP_ ID on every run, so the committed pbxproj would change
+# with each regenerate.
 #
 # Why bother: TCC keys a permission grant to the app's code signature. An ad-hoc
 # signature has no identity beyond its own hash, which changes on every rebuild, so
@@ -31,8 +38,8 @@ options:
 # certificate gives a designated requirement of bundle ID + certificate, and the
 # grant then survives rebuilds.
 configFiles:
-  Debug: Signing.xcconfig
-  Release: Signing.xcconfig
+  Debug: Config/Signing.xcconfig
+  Release: Config/Signing.xcconfig
 
 settings:
   base:

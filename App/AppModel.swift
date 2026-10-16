@@ -39,6 +39,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var setupResult: SetupResult?
     /// The client a Connect is running for, so its button can show progress.
     @Published private(set) var connectingClientID: String?
+    /// Whether macOS opens MacBridge at login, as last read from the system.
+    @Published private(set) var launchAtLogin: LaunchAtLogin.Status = .disabled
+    /// Why the last change to ``launchAtLogin`` failed, shown under the checkbox.
+    @Published private(set) var launchAtLoginError: String?
     @Published var log = ActivityLog()
     /// The animated traffic in the menu-bar icon and the panel. Not `@Published`:
     /// it ticks at 30fps while busy, and only the views drawing it should redraw.
@@ -55,6 +59,7 @@ final class AppModel: ObservableObject {
     init() {
         refreshPermissions()
         refreshClientSetup()
+        refreshLaunchAtLogin()
     }
 
     /// Re-read the client config files. Cheap, and they change outside the app —
@@ -207,6 +212,7 @@ final class AppModel: ObservableObject {
         lines.append("MacBridge \(MacBridge.version)")
         lines.append("bundle:     \(Bundle.main.bundlePath)")
         lines.append("binary:     \(shimPath)")
+        lines.append("at login:   \(launchAtLogin)")
 
         switch state {
         case .listening(let path): lines.append("bridge:     listening on \(path)")
@@ -279,12 +285,38 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    // MARK: Launch at login
+
+    /// Re-read the login-item state, which the user can also change in System Settings.
+    func refreshLaunchAtLogin() {
+        launchAtLogin = LaunchAtLogin.status
+        // Fixed elsewhere (System Settings, or a later attempt): drop the old error.
+        if launchAtLogin == .enabled { launchAtLoginError = nil }
+    }
+
+    /// Turn "Open at login" on or off, then read back what macOS actually recorded.
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            try LaunchAtLogin.setEnabled(enabled)
+            launchAtLoginError = nil
+            BridgeLog.info("open at login \(enabled ? "enabled" : "disabled")", category: .app)
+        } catch {
+            launchAtLoginError = error.localizedDescription
+            BridgeLog.error(
+                "could not \(enabled ? "enable" : "disable") open at login: \(error.localizedDescription)",
+                category: .app
+            )
+        }
+        refreshLaunchAtLogin()
+    }
+
     // MARK: Permissions
 
     /// Re-read permissions and client configs, which can change outside the app.
     func refreshEverything() {
         refreshPermissions()
         refreshClientSetup()
+        refreshLaunchAtLogin()
     }
 
     /// Re-read TCC status for every domain. Never prompts.

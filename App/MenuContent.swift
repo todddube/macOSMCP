@@ -39,6 +39,8 @@ struct MenuContent: View {
         }
         .padding(12)
         .frame(width: 380)
+        // Login items can be changed in System Settings while the panel is closed.
+        .onAppear { model.refreshLaunchAtLogin() }
     }
 
     // MARK: Header
@@ -439,12 +441,55 @@ struct MenuContent: View {
 
             Divider()
 
+            launchAtLogin
+
+            Divider()
+
             HStack {
                 Button("About MacBridge") { AboutWindow.show() }
                     .controlSize(.small)
                 Spacer()
                 Button("Quit MacBridge") { NSApplication.shared.terminate(nil) }
                     .controlSize(.small)
+            }
+        }
+    }
+
+    // MARK: Launch at login
+
+    /// The "Open at login" checkbox. Its value is what macOS has on record, not a
+    /// stored preference, so switching it off in System Settings unticks it here.
+    private var launchAtLogin: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Open MacBridge at login", isOn: Binding(
+                get: { model.launchAtLogin != .disabled },
+                set: { model.setLaunchAtLogin($0) }
+            ))
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .disabled(!LaunchAtLogin.isAvailable)
+
+            if !LaunchAtLogin.isAvailable {
+                Text("Available once MacBridge is in your Applications folder.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else if model.launchAtLogin == .requiresApproval {
+                HStack(spacing: 6) {
+                    Text("Switched off in System Settings.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                    Button("Open Login Items…") { LaunchAtLogin.openSystemSettings() }
+                        .controlSize(.small)
+                }
+            } else if let error = model.launchAtLoginError {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Keeps the bridge ready for your AI clients after a restart.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
     }

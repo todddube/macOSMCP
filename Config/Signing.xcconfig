@@ -1,0 +1,18 @@
+// Code signing for MacBridge.xcodeproj, tracked so a fresh clone builds in Xcode.
+// Copyright © 2026 Todd Dube. Licensed under the MIT License; see LICENSE.
+//
+// The default is ad-hoc ("Sign to Run Locally"): it needs no certificate or Apple
+// account, so ⌘B works straight after cloning. Its catch is that an ad-hoc signature
+// changes on every build, so macOS revokes Calendar and Reminders after each
+// reinstall and you grant them again from the panel.
+//
+// For grants that survive rebuilds, run `make signing` (or `make project`). It finds
+// a Developer ID or Apple Development certificate on this Mac and writes
+// Signing.local.xcconfig, which is gitignored and overrides the lines below.
+
+CODE_SIGN_STYLE = Manual
+DEVELOPMENT_TEAM =
+PROVISIONING_PROFILE_SPECIFIER =
+CODE_SIGN_IDENTITY = -
+
+#include? "Signing.local.xcconfig"

@@ -66,12 +66,22 @@ for Claude Code).
 
 ### Build from source
 
-Requires **macOS 13+**, **Xcode 16+** (for the app bundle and the tests), and
-[xcodegen](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`.
+Requires **macOS 13+** and **Xcode 16+**. Everything else is in the repo: the Xcode project is
+checked in, and the one package dependency, the
+[MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk), is pinned in `Package.resolved`
+and fetched by Xcode on first open.
+
+**In Xcode:** open `MacBridge.xcodeproj`, choose the **MacBridge** scheme and press **⌘B**. The
+build installs itself to `/Applications/MacBridge.app` (see [Working in Xcode](#working-in-xcode)).
+
+**From the terminal:**
 
 ```bash
 make install     # build Release, install to /Applications, launch
 ```
+
+Neither route needs [xcodegen](https://github.com/yonaskolb/XcodeGen). You only need it
+(`brew install xcodegen`) to regenerate the project after editing `project.yml`.
 
 Then click the menu-bar icon and **Grant** Calendar and Reminders access.
 
@@ -112,6 +122,8 @@ panel states where you are:
   DIAGNOSTICS
     [Open Log]  [Copy Diagnostics]  [Refresh]
     [Restart Bridge]  [Relaunch App]
+
+    ☐ Open MacBridge at login
 ```
 
 If another copy of MacBridge is the one your clients point at, a warning appears at the top with its
@@ -168,8 +180,10 @@ clients are configured for a different copy than the one running.
 TCC keys a permission grant to the app's **code signature**, so how the app is signed decides
 whether grants survive a rebuild.
 
-`make project` runs `make signing`, which looks for a signing identity and writes a gitignored,
-machine-local `Signing.xcconfig`:
+The checked-in `Config/Signing.xcconfig` signs **ad-hoc**, so a fresh clone builds with no certificate or
+Apple account. `make signing` (which `make project` also runs) looks for a certificate on your Mac
+and writes a gitignored, machine-local `Config/Signing.local.xcconfig`, which `Config/Signing.xcconfig` includes
+and which overrides the ad-hoc default:
 
 | Identity found | Effect |
 |---|---|
@@ -289,7 +303,7 @@ the shim side. Both ship in the same bundle, so they always update together.
 ```bash
 make help       # every target
 make build      # SwiftPM: MacBridgeKit + the macbridge CLI
-make test       # 79 tests, 11 suites; needs no permissions, touches no user data
+make test       # 109 tests, 15 suites; needs no permissions, touches no user data
 make app        # build MacBridge.app
 make install    # build Release, install to /Applications, launch
 make project    # regenerate MacBridge.xcodeproj from project.yml
@@ -319,6 +333,8 @@ is the accurate view of what the app itself holds.
 
 ```
 project.yml              Xcode project spec — targets, build settings, Info.plist
+MacBridge.xcodeproj/     generated from project.yml; checked in so Xcode builds a fresh clone
+Config/Signing.xcconfig  ad-hoc signing default; includes the local Signing.local.xcconfig
 Package.swift            SwiftPM: the kit, the CLI, the tests
 App/                     the menu-bar app (Xcode target only)
   main.swift             entry point: GUI or CLI, decided by the arguments
@@ -329,6 +345,8 @@ App/                     the menu-bar app (Xcode target only)
   StatusItemController.swift  right-click menu and client status dots
   BridgeTraffic.swift    traffic animation on the bridge glyph
   AboutWindow.swift      About window: author, license, third-party credits
+  InstallLocation.swift  offers to move a downloaded copy into /Applications
+  LaunchAtLogin.swift    "Open MacBridge at login" via SMAppService
 Sources/
   MacBridgeKit/          all logic; no AppKit, so it stays terminal-testable
     Calendar/            CalendarService (actor), FreeBusy, Recurrence, mapping
@@ -356,11 +374,12 @@ test instead of failing the first time a model calls it.
 
 ## Building
 
-`MacBridge.xcodeproj` is **generated** from `project.yml` by `make project`, and is gitignored — a
-`.pbxproj` reviews badly and merges worse. `project.yml` is the source of truth for targets, build
-settings *and* the Info.plist, so **`App/Info.plist` is generated too**; editing it by hand
-accomplishes nothing. `Signing.xcconfig` is generated as well, and is machine-local because a
-certificate hash is not portable.
+`MacBridge.xcodeproj` is **generated** from `project.yml` by `make project`, and checked in so a
+fresh clone opens and builds in Xcode without xcodegen. `project.yml` is the source of truth for
+targets, build settings *and* the Info.plist, so **`App/Info.plist` is generated too**; editing either
+by hand accomplishes nothing, because the next `make project` overwrites it. After changing
+`project.yml`, run `make project` and commit the regenerated files with it. Machine-local signing
+goes in the gitignored `Config/Signing.local.xcconfig` (see [Permissions and rebuilds](#permissions-and-rebuilds)).
 
 ### Working in Xcode
 
@@ -373,7 +392,7 @@ Do not point a client at a DerivedData path: TCC grants attach to it, the hash c
 clean build, and Xcode may delete the directory.
 
 ```bash
-make project && open MacBridge.xcodeproj
+open MacBridge.xcodeproj      # or `make project && open MacBridge.xcodeproj` to re-detect signing
 ```
 
 Two targets, and the usual shortcuts all work:
@@ -382,7 +401,7 @@ Two targets, and the usual shortcuts all work:
 |---|---|
 | **⌘B** | builds `MacBridge.app` — app and CLI in one binary |
 | **⌘R** | runs it; it appears in the menu bar, not the Dock (`LSUIElement`) |
-| **⌘U** | runs all 79 tests in the `MacBridgeTests` bundle, listed in the Test navigator |
+| **⌘U** | runs all 109 tests in the `MacBridgeTests` bundle, listed in the Test navigator |
 
 `MacBridgeTests` is a native Xcode test bundle compiled from the same
 `Tests/MacBridgeKitTests` sources that `swift test` uses — one set of tests, two runners, so a
@@ -472,6 +491,12 @@ Messages support that is no longer planned. MacBridge now asks for Calendar and 
 nothing else. Removed a calendar filter that matched "Scheduled Reminders" by its English title.
 EventKit never returns that virtual calendar, so the filter did nothing, and it would have failed
 on a non-English Mac anyway.
+
+An **Open MacBridge at login** checkbox at the bottom of the panel registers the app as a login
+item (`SMAppService`), so the bridge is ready after a restart. It reads its state back from macOS,
+so turning it off in System Settings → Login Items unticks it too, and it's offered only for a copy
+in Applications. The Xcode project is now checked in, with ad-hoc signing by default, so a fresh
+clone builds in Xcode with no xcodegen and no certificate; `make signing` writes the local override.
 
 
 **0.7.0** — About window, right-click menu, client status dots, and traffic in the menu bar.
