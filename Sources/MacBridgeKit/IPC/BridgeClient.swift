@@ -40,6 +40,9 @@ public actor BridgeClient {
         case protocolFailure(String)
         case toolFailed(String)
         case wrongBundle(expected: String, actual: String)
+        /// The connection dropped after a write tool's request was sent, so it may
+        /// or may not have run. Never retried: running it again could duplicate it.
+        case outcomeUnknown(tool: String)
 
         public var errorDescription: String? {
             switch self {
@@ -52,6 +55,12 @@ public actor BridgeClient {
                     This macbridge belongs to \(expected), but \(actual) answered on the bridge. \
                     Two copies of MacBridge are running — quit the one at \(actual) from its \
                     menu-bar icon, then retry.
+                    """
+            case .outcomeUnknown(let tool):
+                return """
+                    The connection to MacBridge dropped after \(tool) was sent, so it may or may not \
+                    have completed. Check with calendar_search_events or reminders_search_reminders \
+                    before calling it again, or the change could be made twice.
                     """
             }
         }
@@ -219,9 +228,17 @@ public actor BridgeClient {
     /// Bridge button — left every connected shim permanently broken until the AI
     /// client itself restarted the MCP server, which users experience as "it just
     /// stopped working".
+    ///
+    /// A write tool is retried only if its request never reached the app. Once the
+    /// bytes are written, a dropped connection means the app may have saved the
+    /// change before dying, and repeating the call would make a second event or
+    /// reminder; the caller hears ``ClientError/outcomeUnknown(tool:)`` instead.
+    /// Restarting the app still recovers transparently: writing to the closed
+    /// socket fails before anything is sent.
     private func request(_ request: BridgeRequest) async throws -> BridgeResponse {
+        var sent = false
         do {
-            return try sendAndReceive(request)
+            return try sendAndReceive(request, sent: &sent)
         } catch {
             guard shouldRetry(after: error), let reconnect else { throw error }
 
@@ -229,13 +246,29 @@ public actor BridgeClient {
             framer = LineFramer()
             queued.removeAll()
 
+            if sent && !Self.isSafeToRepeat(request) {
+                // The next request reconnects on its own: with no socket, its send
+                // fails before writing anything and takes the retry path.
+                throw ClientError.outcomeUnknown(tool: request.name ?? "the tool")
+            }
+
             // Wait properly for the app to come back, rather than making one attempt
             // after a fixed delay: launching takes a second or three, and a single
             // 750ms try surfaced "The connection was closed." to the model instead of
             // recovering.
             guard try await reestablish(to: reconnect.socketURL) else { throw error }
             try handshake(clientName: reconnect.clientName, clientVersion: reconnect.clientVersion)
-            return try sendAndReceive(request)
+            var resent = false
+            return try sendAndReceive(request, sent: &resent)
+        }
+    }
+
+    /// Whether sending `request` a second time can't change anything: the tool
+    /// list, a ping, or a read-only tool.
+    static func isSafeToRepeat(_ request: BridgeRequest) -> Bool {
+        switch request.op {
+        case .list, .ping: return true
+        case .call: return request.name.map(ToolRegistry.isReadOnly) ?? false
         }
     }
 
@@ -262,7 +295,7 @@ public actor BridgeClient {
         if let error = error as? ClientError {
             switch error {
             case .protocolFailure: return true
-            case .refused, .wrongBundle, .appUnavailable, .toolFailed: return false
+            case .refused, .wrongBundle, .appUnavailable, .toolFailed, .outcomeUnknown: return false
             }
         }
         if let error = error as? SocketEndpoint.SocketError {
@@ -274,9 +307,12 @@ public actor BridgeClient {
         return false
     }
 
-    private func sendAndReceive(_ request: BridgeRequest) throws -> BridgeResponse {
+    /// - Parameter sent: set once every byte of the request has been written,
+    ///   which is the point after which the app may have acted on it.
+    private func sendAndReceive(_ request: BridgeRequest, sent: inout Bool) throws -> BridgeResponse {
         guard fd >= 0 else { throw ClientError.protocolFailure("not connected") }
         try SocketEndpoint.writeAll(fd, try BridgeCodec.line(request))
+        sent = true
 
         // Responses arrive in order on this connection, but skip any whose id does
         // not match rather than assuming — a mismatch means a bug worth not

@@ -252,17 +252,19 @@ public actor RemindersService {
         if let title = args.optionalString("title") { reminder.title = title }
 
         if args.contains("due") {
+            let oldDue = dueDate(reminder)
             if args.isExplicitNull("due") || args.optionalString("due") == nil {
                 reminder.dueDateComponents = nil
-                clearAlarms(on: reminder)
+                removeDueAlarms(from: reminder, oldDue: oldDue, includingRelative: true)
             } else if let due = try args.optionalDate("due") {
                 setDue(due, on: reminder)
 
-                // The old absolute alarm has to go with the old due date, or
+                // The old due-time alarm has to go with the old due date, or
                 // "move my 2pm reminder to 5pm" keeps notifying at 2pm and never
                 // fires at 5pm.
-                clearAlarms(on: reminder)
-                if due.hasTime, try args.bool("alarm", default: true) {
+                removeDueAlarms(from: reminder, oldDue: oldDue, includingRelative: false)
+                if due.hasTime, try args.bool("alarm", default: true),
+                   !(reminder.alarms ?? []).contains(where: { $0.absoluteDate == due.date }) {
                     reminder.addAlarm(EKAlarm(absoluteDate: due.date))
                 }
             }
@@ -488,8 +490,24 @@ public actor RemindersService {
         reminder.dueDateComponents = Calendar.current.dateComponents(units, from: due.date)
     }
 
-    private func clearAlarms(on reminder: EKReminder) {
-        reminder.alarms?.forEach { reminder.removeAlarm($0) }
+    /// Remove the alarm that belonged to the old due date: an absolute alarm at
+    /// exactly that time, which is what both this tool and Reminders.app create for
+    /// a timed due date.
+    ///
+    /// Everything else stays. Removing every alarm, as this used to, also threw
+    /// away location alarms ("remind me when I get home") and extra alerts set in
+    /// Reminders.app. Alerts relative to the due date move with it, so they go only
+    /// when the due date itself is removed and they would have nothing to follow.
+    private func removeDueAlarms(from reminder: EKReminder, oldDue: Date?, includingRelative: Bool) {
+        for alarm in reminder.alarms ?? [] where alarm.structuredLocation == nil {
+            if let absolute = alarm.absoluteDate {
+                if let oldDue, abs(absolute.timeIntervalSince(oldDue)) < 1 {
+                    reminder.removeAlarm(alarm)
+                }
+            } else if includingRelative {
+                reminder.removeAlarm(alarm)
+            }
+        }
     }
 
     /// `isCompleted` and `completionDate` must move together; setting only the

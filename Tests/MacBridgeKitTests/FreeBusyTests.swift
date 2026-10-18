@@ -128,3 +128,21 @@ struct FreeBusyTests {
         #expect(FreeBusy.dailyWindows(in: range, startHour: 17, endHour: 9).isEmpty)
     }
 }
+
+/// `calendar_find_available_times` starts at the next quarter hour, never at a
+/// time already past or at an odd minute a person would not propose.
+@Suite("Free-slot search start")
+struct SearchStartTests {
+
+    @Test("Now rounds up to the next quarter hour, and a quarter hour stays put", arguments: [
+        ("2026-09-28T15:07:23", "2026-09-28T15:15:00"),
+        ("2026-09-28T15:45:01", "2026-09-28T16:00:00"),
+        ("2026-09-28T15:30:00", "2026-09-28T15:30:00"),
+        ("2026-09-28T23:59:00", "2026-09-29T00:00:00"),
+    ])
+    func quarterHour(now: String, expected: String) throws {
+        let input = try #require(DateParsing.parse(now)).date
+        let want = try #require(DateParsing.parse(expected)).date
+        #expect(CalendarService.nextQuarterHour(after: input) == want)
+    }
+}

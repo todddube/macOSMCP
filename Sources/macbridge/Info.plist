@@ -7,7 +7,7 @@
 	<key>CFBundleName</key>
 	<string>MacBridge</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>1.8.0</string>
 	<!-- TCC will not prompt a process with no usage description, and a SwiftPM
 	     executable has no bundle to carry one, so this plist is linked into the
 	     binary's __TEXT,__info_plist section. Only `mcp --direct` needs it: inside

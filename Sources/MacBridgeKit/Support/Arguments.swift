@@ -151,8 +151,9 @@ public struct Arguments {
         guard let parsed = DateParsing.parse(s) else {
             throw MacBridgeError.invalidArgument(
                 name: key,
-                reason: "could not read '\(s)' as a date. Use YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, "
-                    + "an ISO-8601 timestamp, or a relative value like 'today', 'tomorrow' or '+7d'."
+                reason: "could not read '\(s)' as a date. Use YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS], "
+                    + "an ISO-8601 timestamp, or a relative value like 'today', 'tomorrow', '+7d', "
+                    + "'+2h' or '+30min' (months are '+1mo'; '+1m' is ambiguous and not accepted)."
             )
         }
         return parsed

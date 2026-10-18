@@ -107,6 +107,99 @@ public actor ToolRegistry {
         guard let handler = handlers[name] else {
             throw MacBridgeError.unknownTool(name)
         }
+        try Self.checkArgumentNames(tool: name, arguments: arguments)
         return try await handler(Arguments(arguments))
+    }
+
+    // MARK: Argument names
+
+    /// Spellings the services read but the schemas do not advertise, kept so that
+    /// calls which worked before unknown names were refused still work.
+    private static let hiddenAliases: [String: Set<String>] = [
+        "calendar_search_events": ["calendar"],
+        "calendar_find_available_times": ["calendar"],
+        "calendar_update_event": ["id"],
+        "calendar_reschedule_event": ["id"],
+        "calendar_cancel_event": ["id"],
+        // Search results pair id with occurrence_date; revealing any occurrence
+        // shows the event, so the date is accepted and ignored.
+        "calendar_open_event": ["id", "occurrence_date"],
+        "reminders_search_reminders": ["lists"],
+        "reminders_update_reminder": ["id"],
+        "reminders_complete_reminder": ["id"],
+        "reminders_delete_reminder": ["id"],
+        "reminders_open_reminder": ["id"],
+        "reminders_update_list": ["list_id"],
+        "reminders_delete_list": ["list_id"],
+    ]
+
+    /// The tools with hidden aliases, so a test can catch one left behind by a rename.
+    static var aliasedToolNames: Set<String> { Set(hiddenAliases.keys) }
+
+    /// Each tool's advertised argument names, from its schema.
+    private static let advertisedArguments: [String: Set<String>] = Dictionary(
+        uniqueKeysWithValues: definitions().map { tool in
+            (tool.name, Set(tool.inputSchema.objectValue?["properties"]?.objectValue?.keys.map { $0 } ?? []))
+        }
+    )
+
+    /// Refuse argument names a tool does not take.
+    ///
+    /// A misspelt name used to be ignored silently, so `reminders_create_reminder`
+    /// with `due_date` made an undated reminder and reported success, and
+    /// `calendar_search_events` with `calendar_id` searched every calendar.
+    /// Refusing costs the model one retry; the silent version cost the user data.
+    static func checkArgumentNames(tool: String, arguments: [String: Value]?) throws {
+        guard let arguments, !arguments.isEmpty else { return }
+        let advertised = advertisedArguments[tool] ?? []
+        let accepted = advertised.union(hiddenAliases[tool] ?? [])
+        let unknown = arguments.keys.filter { !accepted.contains($0) }.sorted()
+        guard !unknown.isEmpty else { return }
+
+        var suggestions: [String: String] = [:]
+        for name in unknown {
+            if let guess = closestName(to: name, among: advertised) { suggestions[name] = guess }
+        }
+        throw MacBridgeError.unknownArguments(
+            tool: tool, names: unknown, suggestions: suggestions, accepted: advertised.sorted()
+        )
+    }
+
+    /// The advertised name a model most plausibly meant: one that contains, or is
+    /// contained in, the unknown name once an `_id`/`_date` style suffix is dropped
+    /// (`due_date` → `due`), else the nearest by edit distance if it is close.
+    static func closestName(to name: String, among candidates: Set<String>) -> String? {
+        let lowered = name.lowercased()
+        let stem = lowered.replacingOccurrences(
+            of: #"_(id|ids|date|time|name|names)$"#, with: "", options: .regularExpression
+        )
+        let sorted = candidates.sorted()
+
+        // Three characters minimum, or "t" would "mean" title.
+        if let containing = sorted.first(where: { $0 == stem })
+            ?? sorted.first(where: { stem.count >= 3 && ($0.hasPrefix(stem) || stem.hasPrefix($0)) }) {
+            return containing
+        }
+
+        let scored = sorted.map { ($0, editDistance(lowered, $0)) }
+        guard let best = scored.min(by: { $0.1 < $1.1 }) else { return nil }
+        return best.1 <= max(2, lowered.count / 3) ? best.0 : nil
+    }
+
+    private static func editDistance(_ a: String, _ b: String) -> Int {
+        let a = Array(a), b = Array(b)
+        guard !a.isEmpty else { return b.count }
+        guard !b.isEmpty else { return a.count }
+        var previous = Array(0...b.count)
+        for i in 1...a.count {
+            var current = [i] + Array(repeating: 0, count: b.count)
+            for j in 1...b.count {
+                current[j] = a[i - 1] == b[j - 1]
+                    ? previous[j - 1]
+                    : 1 + min(previous[j - 1], previous[j], current[j - 1])
+            }
+            previous = current
+        }
+        return previous[b.count]
     }
 }

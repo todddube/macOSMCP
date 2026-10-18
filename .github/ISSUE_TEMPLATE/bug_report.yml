@@ -26,7 +26,7 @@ body:
     attributes:
       label: MacBridge version
       description: Shown in About MacBridge, or by `macbridge --help`.
-      placeholder: "0.7.0"
+      placeholder: "1.8.0"
     validations:
       required: true
   - type: input

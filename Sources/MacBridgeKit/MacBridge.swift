@@ -13,7 +13,7 @@ import Foundation
 public enum MacBridge {
     public static let serverName = "macbridge"
     /// Must match MARKETING_VERSION in project.yml; `VersionTests` fails if they drift.
-    public static let version = "0.7.0"
+    public static let version = "1.8.0"
 
     /// Sent to clients as MCP `instructions`: the orientation a model gets
     /// before it has called anything.

@@ -126,3 +126,88 @@ struct DispatchTests {
         #expect(routed == Set(ToolRegistry.definitions().map(\.name)))
     }
 }
+
+/// Argument names are checked before any handler runs, so these touch no EventKit.
+@Suite("Argument names")
+struct ArgumentNameTests {
+
+    @Test("A misspelt name is refused with the likely intended one")
+    func misspeltNameIsRefused() async {
+        let registry = ToolRegistry()
+        await #expect(throws: MacBridgeError.self) {
+            _ = try await registry.call("reminders_create_reminder", arguments: [
+                "title": .string("Pay rent"), "due_date": .string("tomorrow"),
+            ])
+        }
+        do {
+            try ToolRegistry.checkArgumentNames(
+                tool: "reminders_create_reminder",
+                arguments: ["title": .string("Pay rent"), "due_date": .string("tomorrow")]
+            )
+            Issue.record("due_date should have been refused")
+        } catch let MacBridgeError.unknownArguments(tool, names, suggestions, accepted) {
+            #expect(tool == "reminders_create_reminder")
+            #expect(names == ["due_date"])
+            #expect(suggestions["due_date"] == "due")
+            #expect(accepted.contains("due"))
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+    }
+
+    @Test("Suggestions find the intended name", arguments: [
+        ("calendar_search_events", "calendar_id", "calendars"),
+        ("calendar_search_events", "start", "start_date"),
+        ("calendar_create_event", "titel", "title"),
+        ("reminders_search_reminders", "querry", "query"),
+    ])
+    func suggestions(tool: String, wrong: String, intended: String) throws {
+        let advertised = Set(
+            ToolRegistry.definitions().first { $0.name == tool }?
+                .inputSchema.objectValue?["properties"]?.objectValue?.keys.map { $0 } ?? []
+        )
+        #expect(ToolRegistry.closestName(to: wrong, among: advertised) == intended)
+    }
+
+    @Test("Advertised names, undocumented aliases and no arguments all pass")
+    func acceptedNamesPass() throws {
+        try ToolRegistry.checkArgumentNames(tool: "calendar_list_calendars", arguments: nil)
+        try ToolRegistry.checkArgumentNames(tool: "calendar_list_calendars", arguments: [:])
+        try ToolRegistry.checkArgumentNames(
+            tool: "calendar_cancel_event",
+            arguments: ["event_id": .string("x"), "occurrence_date": .string("today"), "span": .string("this_event")]
+        )
+        try ToolRegistry.checkArgumentNames(tool: "calendar_cancel_event", arguments: ["id": .string("x")])
+        try ToolRegistry.checkArgumentNames(tool: "reminders_search_reminders", arguments: ["lists": .string("Home")])
+        try ToolRegistry.checkArgumentNames(
+            tool: "reminders_update_reminder",
+            arguments: ["reminder_id": .string("x"), "alarm": .bool(false)]
+        )
+    }
+
+    @Test("Every hidden alias belongs to a real tool")
+    func aliasesNameRealTools() {
+        // A renamed tool would otherwise leave its aliases silently dead.
+        #expect(ToolRegistry.aliasedToolNames.isSubset(of: Set(ToolRegistry.toolNames)))
+        #expect(throws: MacBridgeError.self) {
+            try ToolRegistry.checkArgumentNames(tool: "calendar_create_event", arguments: ["id": .string("x")])
+        }
+    }
+}
+
+/// Which bridge requests may be sent twice after a dropped connection.
+@Suite("Bridge retry safety")
+struct BridgeRetryTests {
+
+    @Test("Reads and inventory may repeat; writes never do")
+    func onlyReadsRepeat() {
+        #expect(BridgeClient.isSafeToRepeat(BridgeRequest(id: 1, op: .list)))
+        #expect(BridgeClient.isSafeToRepeat(BridgeRequest(id: 1, op: .ping)))
+        #expect(BridgeClient.isSafeToRepeat(BridgeRequest(id: 1, op: .call, name: "calendar_search_events")))
+        for tool in ToolRegistry.definitions() where tool.annotations.readOnlyHint != true {
+            #expect(!BridgeClient.isSafeToRepeat(BridgeRequest(id: 1, op: .call, name: tool.name)),
+                    "\(tool.name) changes data and must not be resent")
+        }
+        #expect(!BridgeClient.isSafeToRepeat(BridgeRequest(id: 1, op: .call, name: nil)))
+    }
+}

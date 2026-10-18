@@ -25,7 +25,7 @@ public struct DateParsing {
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = .current
+        f.timeZone = .autoupdatingCurrent
         return f
     }()
 
@@ -35,7 +35,7 @@ public struct DateParsing {
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        f.timeZone = .current
+        f.timeZone = .autoupdatingCurrent
         return f
     }()
 
@@ -45,7 +45,7 @@ public struct DateParsing {
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
-        f.timeZone = .current
+        f.timeZone = .autoupdatingCurrent
         return f
     }()
 
@@ -55,10 +55,14 @@ public struct DateParsing {
     ///
     /// Accepted, in order of attempt:
     /// - relative words: `now`, `today`, `tomorrow`, `yesterday`
-    /// - relative offsets: `+7d`, `-3d`, `+2w`, `+1m`
+    /// - relative offsets: `+7d`, `-3d`, `+2w`, `+1mo`, `+1y` (date-only), and
+    ///   `+2h`, `+30min` (timed)
     /// - `yyyy-MM-dd`
-    /// - `yyyy-MM-dd'T'HH:mm:ss` (local)
-    /// - full ISO-8601 with offset or `Z`
+    /// - `yyyy-MM-dd'T'HH:mm[:ss[.fff]]`, with `T` or a space, read as local time
+    ///   unless followed by `Z` or an offset such as `+02:00`
+    ///
+    /// `+1m` is refused rather than guessed: a model writes it for minutes about as
+    /// often as for months.
     ///
     /// - Returns: the parsed instant, and whether the input carried a time.
     public static func parse(_ raw: String, now: Date = Date()) -> (date: Date, hasTime: Bool)? {
@@ -66,21 +70,69 @@ public struct DateParsing {
         guard !s.isEmpty else { return nil }
 
         if let relative = parseRelative(s, now: now) { return relative }
+        return parseAbsolute(s)
+    }
 
-        // Date-only must be tried before the offset parser, which would happily
-        // read "2026-09-26" as midnight UTC and shift the day for most users.
-        if s.count == 10, let d = dateOnly.date(from: s) { return (d, false) }
+    /// `2026-09-28`, or a date-time in any of the shapes models emit: with or
+    /// without seconds, fractional seconds, a `T` or a space, and an optional zone.
+    private static let absolutePattern = try! NSRegularExpression(pattern: #"""
+        ^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?(Z|[+-]\d{2}(?::?\d{2})?)?)?$
+        """#, options: [.caseInsensitive])
 
-        if let d = localDateTime.date(from: s) { return (d, true) }
-        if let d = offsetDateTime.date(from: s) { return (d, true) }
+    private static func parseAbsolute(_ s: String) -> (date: Date, hasTime: Bool)? {
+        let range = NSRange(s.startIndex..., in: s)
+        guard let match = absolutePattern.firstMatch(in: s, range: range) else { return nil }
 
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        if let d = iso.date(from: s) { return (d, true) }
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso.date(from: s) { return (d, true) }
+        func group(_ i: Int) -> String? {
+            guard let r = Range(match.range(at: i), in: s) else { return nil }
+            return String(s[r])
+        }
+        func number(_ i: Int) -> Int? { group(i).flatMap { Int($0) } }
 
-        return nil
+        guard let year = number(1), let month = number(2), let day = number(3) else { return nil }
+        let hasTime = group(4) != nil
+        let hour = number(4) ?? 0
+        let minute = number(5) ?? 0
+        let second = number(6) ?? 0
+
+        var calendar = Calendar(identifier: .gregorian)
+        if let zone = group(7) {
+            guard let tz = timeZone(fromDesignator: zone) else { return nil }
+            calendar.timeZone = tz
+        } else {
+            // A bare date-time is local wall time. A date-only value must be too:
+            // read as UTC midnight it lands on the previous day west of Greenwich.
+            calendar.timeZone = .autoupdatingCurrent
+        }
+
+        // Range-check by hand: Calendar would silently roll 2026-13-45 forward.
+        guard (1...12).contains(month), (0...23).contains(hour),
+              (0...59).contains(minute), (0...59).contains(second)
+        else { return nil }
+        let monthStart = DateComponents(year: year, month: month, day: 1)
+        guard let firstOfMonth = calendar.date(from: monthStart),
+              let days = calendar.range(of: .day, in: .month, for: firstOfMonth),
+              days.contains(day)
+        else { return nil }
+
+        let components = DateComponents(
+            year: year, month: month, day: day, hour: hour, minute: minute, second: second
+        )
+        guard let date = calendar.date(from: components) else { return nil }
+        return (date, hasTime)
+    }
+
+    /// `Z`, `+02`, `+0200` or `+02:00`.
+    private static func timeZone(fromDesignator designator: String) -> TimeZone? {
+        if designator.uppercased() == "Z" { return TimeZone(secondsFromGMT: 0) }
+        let sign = designator.hasPrefix("-") ? -1 : 1
+        let digits = designator.dropFirst().filter(\.isNumber)
+        guard digits.count == 2 || digits.count == 4,
+              let hours = Int(digits.prefix(2)),
+              let minutes = Int(digits.dropFirst(2).isEmpty ? "0" : String(digits.dropFirst(2))),
+              hours <= 18, minutes < 60
+        else { return nil }
+        return TimeZone(secondsFromGMT: sign * (hours * 3600 + minutes * 60))
     }
 
     private static func parseRelative(_ s: String, now: Date) -> (date: Date, hasTime: Bool)? {
@@ -98,25 +150,33 @@ public struct DateParsing {
             break
         }
 
-        // +7d / -3d / +2w / +1m / +1y
-        guard let match = s.range(of: #"^([+-])(\d+)([dwmy])$"#, options: .regularExpression) else {
-            return nil
-        }
-        let token = String(s[match])
-        let sign = token.hasPrefix("-") ? -1 : 1
-        let unitChar = token.last!
-        let digits = token.dropFirst().dropLast()
-        guard let amount = Int(digits) else { return nil }
+        // +7d / -3d / +2w / +1mo / +1y, and the timed +2h / +30min
+        let pattern = #"^([+-])(\d{1,6})(d|w|mo|y|h|min)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+              let signRange = Range(match.range(at: 1), in: s),
+              let amountRange = Range(match.range(at: 2), in: s),
+              let unitRange = Range(match.range(at: 3), in: s),
+              let amount = Int(s[amountRange])
+        else { return nil }
+        let value = (s[signRange] == "-" ? -1 : 1) * amount
 
-        let component: Calendar.Component
-        switch unitChar {
-        case "d": component = .day
-        case "w": component = .weekOfYear
-        case "m": component = .month
-        default: component = .year
+        switch s[unitRange].lowercased() {
+        case "h":
+            return cal.date(byAdding: .hour, value: value, to: now).map { ($0, true) }
+        case "min":
+            return cal.date(byAdding: .minute, value: value, to: now).map { ($0, true) }
+        case let unit:
+            let component: Calendar.Component
+            switch unit {
+            case "d": component = .day
+            case "w": component = .weekOfYear
+            case "mo": component = .month
+            default: component = .year
+            }
+            guard let d = cal.date(byAdding: component, value: value, to: now) else { return nil }
+            return (cal.startOfDay(for: d), false)
         }
-        guard let d = cal.date(byAdding: component, value: sign * amount, to: now) else { return nil }
-        return (cal.startOfDay(for: d), false)
     }
 
     // MARK: Formatting

@@ -21,6 +21,11 @@ enum CalendarTools {
         "Calendar name or id. Omit to use every calendar."
     )
 
+    static let occurrenceParameter = Schema.string(
+        "For a repeating event: the occurrence_date of the occurrence to change, exactly as "
+            + "calendar_search_events returned it. Required for a repeating event unless span is all_events."
+    )
+
     /// Every Calendar tool, in the order `tools/list` returns them.
     static func definitions() -> [Tool] {
         [
@@ -41,7 +46,9 @@ enum CalendarTools {
                     Read calendar events in a date range, optionally filtered by text. \
                     This is the only read tool needed: for today's schedule pass start_date and end_date \
                     as "today"; for a search pass a query with a wide range. \
-                    Every event includes an "id" required by the update, reschedule and cancel tools.
+                    Every event includes an "id" required by the update, reschedule and cancel tools. \
+                    A repeating event's occurrences all share one id and differ by "occurrence_date", \
+                    which those tools also need to act on one occurrence.
                     """,
                 inputSchema: Schema.object(properties: [
                     "query": Schema.string("Case-insensitive text matched against title, location and notes."),
@@ -100,9 +107,11 @@ enum CalendarTools {
                         "location": Schema.string("A new location; empty string clears it."),
                         "notes": Schema.string("New notes; empty string clears them."),
                         "url": Schema.string("A new URL; empty string clears it."),
+                        "occurrence_date": occurrenceParameter,
                         "span": Schema.string(
-                            "For a repeating event, whether to change this occurrence only or this and all later ones.",
-                            options: ["this_event", "future_events"]
+                            "For a repeating event: this occurrence only, this and all later ones, or the whole series "
+                                + "(all_events cannot change start, end or all_day).",
+                            options: ["this_event", "future_events", "all_events"]
                         ),
                     ],
                     required: ["event_id"]
@@ -121,6 +130,7 @@ enum CalendarTools {
                         "event_id": Schema.string("The event's id, from calendar_search_events."),
                         "new_start": Schema.string("The new start time. \(Schema.dateFormats)"),
                         "new_end": Schema.string("An explicit new end. Omit to keep the current duration. \(Schema.dateFormats)"),
+                        "occurrence_date": occurrenceParameter,
                         "span": Schema.string(
                             "For a repeating event, whether to move this occurrence only or this and all later ones.",
                             options: ["this_event", "future_events"]
@@ -140,9 +150,10 @@ enum CalendarTools {
                 inputSchema: Schema.object(
                     properties: [
                         "event_id": Schema.string("The event's id, from calendar_search_events."),
+                        "occurrence_date": occurrenceParameter,
                         "span": Schema.string(
-                            "For a repeating event, whether to delete this occurrence only or this and all later ones.",
-                            options: ["this_event", "future_events"]
+                            "For a repeating event: delete this occurrence only, this and all later ones, or the whole series.",
+                            options: ["this_event", "future_events", "all_events"]
                         ),
                     ],
                     required: ["event_id"]
@@ -171,7 +182,7 @@ enum CalendarTools {
                 inputSchema: Schema.object(
                     properties: [
                         "duration_minutes": Schema.integer("How long the slot needs to be.", default: 30, minimum: 1, maximum: 1440),
-                        "start_date": Schema.string("Earliest date to consider. Defaults to now. \(Schema.dateFormats)"),
+                        "start_date": Schema.string("Earliest date to consider; times already past are never offered. Defaults to now. \(Schema.dateFormats)"),
                         "end_date": Schema.string("Latest date to consider. Defaults to 7 days out. \(Schema.dateFormats)"),
                         "day_start_hour": Schema.integer("First hour of the working day, 0–23.", default: 9, minimum: 0, maximum: 23),
                         "day_end_hour": Schema.integer("Last hour of the working day, 1–24.", default: 17, minimum: 1, maximum: 24),

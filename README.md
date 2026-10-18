@@ -4,7 +4,7 @@
 ![Platform: macOS 13+](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey.svg)
 ![Swift](https://img.shields.io/badge/Swift-6-orange.svg)
 
-**v0.7.0** — a free, open-source macOS **menu-bar app and MCP server** that gives Claude Code and Claude Desktop read
+**v1.8.0** — a free, open-source macOS **menu-bar app and MCP server** that gives Claude Code and Claude Desktop read
 and write access to your **Calendar** and **Reminders**, through EventKit, entirely on your Mac.
 
 Swift package + Xcode app. No Python, no Node, no network. Requires macOS 13+.
@@ -99,7 +99,7 @@ MacBridge does nothing on its own — a client has to be told to run `macbridge 
 panel states where you are:
 
 ```
-  ● MacBridge 0.7.0                          18 tools
+  ● MacBridge 1.8.0                          18 tools
     Listening — 12 calls, 1 failed
 
   PERMISSIONS
@@ -466,7 +466,7 @@ and distribute, with no warranty. Every source file carries the copyright notice
 
 ## Version history
 
-**Unreleased** — Open-source release preparation.
+**1.8.0** — Open-source release, one-click setup, and safer edits.
 Released under the MIT License, with a copyright notice in every source file. Added
 `THIRD_PARTY_NOTICES.md` with the full license text of every package compiled into the binary,
 and bundled it and `LICENSE` into the app. The About window now shows the license, credits for
@@ -504,6 +504,22 @@ Grant button and tool calls failed until a relaunch. The panel now trusts the re
 and each tool call asks again on its own store while EventKit still lags. The panel also re-reads
 permissions each time it opens. `make signing` warns when the signing
 identity changes, since macOS then asks for Calendar and Reminders again.
+
+Edits to a repeating event now reach the occurrence you meant. Every occurrence shares one id, so
+"cancel next Tuesday's standup" used to act on the series' first occurrence instead. Search now
+returns an `occurrence_date` with each occurrence, the update, reschedule and cancel tools take it,
+and a new `span: all_events` changes the whole series. A write to a repeating event without one is
+refused rather than guessed. An occurrence moved on its own can still be found afterwards.
+
+A write is no longer sent twice when the connection drops mid-call: if the app may already have
+saved it, the model is told to check before retrying, instead of the shim resending it and making a
+duplicate. Misspelt argument names are refused with a suggestion (`due_date` → `due`) instead of
+being ignored, which had created undated reminders that reported success. Dates accept the shapes
+models actually write (`T14:00`, `2026-10-18 9:00`, fractional seconds) and `+2h`, `+30min` and
+`+1mo`; `+1m` is refused as ambiguous. A timed `start_date` in a calendar search is kept rather
+than rounded to midnight, free-time search no longer offers slots that have already passed, and
+output follows the Mac's time zone after travel. Moving a reminder's due date replaces only the
+alarm at the old time, keeping location alarms and extra alerts.
 
 
 **0.7.0** — About window, right-click menu, client status dots, and traffic in the menu bar.

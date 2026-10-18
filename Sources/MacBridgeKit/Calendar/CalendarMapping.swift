@@ -45,7 +45,14 @@ enum CalendarMapping {
             out["id"] = .string(id)
         } else {
             out["id"] = .null
-            out["warning"] = .string("This occurrence has no stable identifier and cannot be edited.")
+            out["warning"] = .string("This event has no stable identifier and cannot be edited.")
+        }
+
+        // Every occurrence of a repeating event shares one id, so the id alone
+        // names the series, not this occurrence. occurrence_date is the other half
+        // of the handle, and the write tools take it to reach this exact one.
+        if event.hasRecurrenceRules || event.isDetached, let occurrence = event.occurrenceDate {
+            out["occurrence_date"] = .string(DateParsing.offsetDateTime.string(from: occurrence))
         }
 
         if let start = event.startDate {

@@ -204,6 +204,29 @@ struct LiveRoundTripTests {
         }
     }
 
+    @Test("Moving a timed due date replaces its alarm rather than adding a second")
+    func movingDueMovesAlarm() async throws {
+        try await withScratchList { service, list in
+            let day = DateParsing.dateOnly.string(
+                from: Calendar.current.date(byAdding: .day, value: 3, to: Date())!
+            )
+            let created = try await service.createReminder(Arguments([
+                "title": .string("Alarm probe"),
+                "list": .string(list),
+                "due": .string("\(day)T14:00"),
+            ]))
+            let id = try #require(created.objectValue?["reminder"]?.objectValue?["id"]?.stringValue)
+            #expect(created.objectValue?["reminder"]?.objectValue?["alarm_count"]?.intValue == 1)
+
+            let moved = try await service.updateReminder(Arguments([
+                "reminder_id": .string(id),
+                "due": .string("\(day)T17:00"),
+            ]))
+            let fields = try #require(moved.objectValue?["reminder"]?.objectValue)
+            #expect(fields["alarm_count"]?.intValue == 1, "the 2pm alarm goes, the 5pm one arrives")
+        }
+    }
+
     @Test("Listing reminder lists reports a default")
     func enumeration() async throws {
         let reminders = try await RemindersService().listLists(Arguments([:]))
@@ -305,6 +328,105 @@ struct LiveCalendarTests {
         #expect(event["all_day"]?.boolValue == true,
                 "two date-only endpoints mean an all-day event")
         #expect(event["start"]?.stringValue == start, "an all-day start formats as a bare date")
+    }
+
+    @Test("A repeating event's occurrences are edited and cancelled one at a time")
+    func repeatingOccurrences() async throws {
+        let service = CalendarService()
+        let calendars = try await service.listCalendars()
+        let writable = calendars.objectValue?["calendars"]?.arrayValue?
+            .first { $0.objectValue?["writable"]?.boolValue == true }
+        let calendarName = try #require(writable?.objectValue?["title"]?.stringValue)
+
+        let firstDay = Calendar.current.date(byAdding: .day, value: 500, to: Date())!
+        let first = DateParsing.dateOnly.string(from: firstDay)
+        let last = DateParsing.dateOnly.string(
+            from: Calendar.current.date(byAdding: .day, value: 6, to: firstDay)!
+        )
+        let title = "MacBridge repeat probe \(UUID().uuidString.prefix(8))"
+
+        let created = try await service.createEvent(Arguments([
+            "title": .string(title),
+            "calendar": .string(calendarName),
+            "start": .string("\(first)T10:00:00"),
+            "duration_minutes": .int(30),
+            "recurrence": .string("daily"),
+            "recurrence_count": .int(5),
+        ]))
+        let id = try #require(created.objectValue?["event"]?.objectValue?["id"]?.stringValue)
+
+        func occurrences() async throws -> [[String: Value]] {
+            let found = try await service.searchEvents(Arguments([
+                "query": .string(title), "start_date": .string(first), "end_date": .string(last),
+            ]))
+            return (found.objectValue?["events"]?.arrayValue ?? []).compactMap(\.objectValue)
+        }
+
+        do {
+            let all = try await occurrences()
+            #expect(all.count == 5)
+            #expect(Set(all.compactMap { $0["id"]?.stringValue }) == [id], "occurrences share one id")
+            let dates = all.compactMap { $0["occurrence_date"]?.stringValue }
+            #expect(Set(dates).count == 5, "each occurrence has its own occurrence_date")
+            try #require(dates.count == 5)
+
+            // Without occurrence_date the target is ambiguous, so nothing happens.
+            await #expect(throws: MacBridgeError.self) {
+                _ = try await service.cancelEvent(Arguments(["event_id": .string(id)]))
+            }
+
+            // Cancel the third occurrence only.
+            _ = try await service.cancelEvent(Arguments([
+                "event_id": .string(id), "occurrence_date": .string(dates[2]), "span": .string("this_event"),
+            ]))
+            let afterCancel = try await occurrences()
+            #expect(afterCancel.count == 4)
+            #expect(!afterCancel.contains { $0["occurrence_date"]?.stringValue == dates[2] },
+                    "the chosen occurrence is the one that went")
+
+            // Move the second occurrence only.
+            let secondDay = String(dates[1].prefix(10))
+            _ = try await service.rescheduleEvent(Arguments([
+                "event_id": .string(id), "occurrence_date": .string(dates[1]),
+                "new_start": .string("\(secondDay)T15:00:00"),
+            ]))
+            let afterMove = try await occurrences()
+            let moved = afterMove.filter { $0["start"]?.stringValue?.contains("T15:00:00") == true }
+            #expect(moved.count == 1, "only the chosen occurrence moved")
+            #expect(moved.first?["start"]?.stringValue?.hasPrefix(secondDay) == true)
+            #expect(moved.first?["occurrence_date"]?.stringValue == dates[1],
+                    "a moved occurrence keeps its original occurrence_date")
+            // EventKit gives a moved occurrence an id of its own; search returns it.
+            let movedID = try #require(moved.first?["id"]?.stringValue)
+
+            // Move it again, two days later, by the series id and original date: out
+            // of the narrow lookup window and under a different id, so this only
+            // works if the moved occurrence is still found through the series.
+            let laterDay = String(dates[3].prefix(10))
+            _ = try await service.rescheduleEvent(Arguments([
+                "event_id": .string(id), "occurrence_date": .string(dates[1]),
+                "new_start": .string("\(laterDay)T16:00:00"),
+            ]))
+            let afterSecondMove = try await occurrences()
+            #expect(afterSecondMove.contains {
+                $0["occurrence_date"]?.stringValue == dates[1]
+                    && $0["start"]?.stringValue?.hasPrefix("\(laterDay)T16:00:00") == true
+            }, "the moved occurrence was found again and moved a second time")
+
+            // And by its own id alone, which needs no occurrence_date.
+            _ = try await service.rescheduleEvent(Arguments([
+                "event_id": .string(movedID), "new_start": .string("\(laterDay)T17:00:00"),
+            ]))
+            #expect(try await occurrences().contains {
+                $0["start"]?.stringValue?.hasPrefix("\(laterDay)T17:00:00") == true
+            })
+        } catch {
+            _ = try? await service.cancelEvent(Arguments(["event_id": .string(id), "span": .string("all_events")]))
+            throw error
+        }
+
+        _ = try await service.cancelEvent(Arguments(["event_id": .string(id), "span": .string("all_events")]))
+        #expect(try await occurrences().isEmpty, "all_events removes the whole series")
     }
 
     @Test("Free/busy search returns slots inside the requested working hours")

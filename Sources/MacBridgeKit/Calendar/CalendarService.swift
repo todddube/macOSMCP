@@ -87,8 +87,12 @@ public actor CalendarService {
         let calendar = Calendar.current
 
         // Default window: today through +7 days, the span "what's coming up" usually means.
+        // A date-only start means "from the beginning of that day"; a timed one is
+        // taken as given, so "from 2pm" does not also return the morning.
         let startInput = try args.optionalDate("start_date")
-        let start = calendar.startOfDay(for: startInput?.date ?? now)
+        let start = (startInput?.hasTime ?? false)
+            ? startInput!.date
+            : calendar.startOfDay(for: startInput?.date ?? now)
 
         let endInput = try args.optionalDate("end_date")
         let rawEnd = endInput?.date ?? calendar.date(byAdding: .day, value: 7, to: start) ?? start
@@ -244,8 +248,18 @@ public actor CalendarService {
     public func updateEvent(_ args: Arguments) async throws -> Value {
         try await ensureAccess()
 
-        let event = try fetchEvent(args)
         let span = try resolveSpan(args)
+        let event = try fetchEvent(args, span: span)
+        if span == .allEvents, Self.repeats(event),
+           let moved = ["start", "end", "all_day"].first(where: args.contains) {
+            throw MacBridgeError.invalidArgument(
+                name: moved,
+                reason: """
+                    changing the time with span 'all_events' would move the series' first occurrence. \
+                    Use calendar_reschedule_event with an occurrence_date and span 'future_events'.
+                    """
+            )
+        }
 
         // Patch semantics:
         // an absent key leaves the field alone, an explicit null or "" clears it.
@@ -294,11 +308,11 @@ public actor CalendarService {
             event.calendar = cal
         }
 
-        try save(event, span: span)
+        try save(event, span: span.ekSpan)
 
         return .object([
             "updated": .bool(true),
-            "span": .string(span == .thisEvent ? "this_event" : "future_events"),
+            "span": .string(span.rawValue),
             "event": CalendarMapping.event(event),
         ])
     }
@@ -313,8 +327,17 @@ public actor CalendarService {
     public func rescheduleEvent(_ args: Arguments) async throws -> Value {
         try await ensureAccess()
 
-        let event = try fetchEvent(args)
         let span = try resolveSpan(args)
+        let event = try fetchEvent(args, span: span)
+        if span == .allEvents, Self.repeats(event) {
+            throw MacBridgeError.invalidArgument(
+                name: "span",
+                reason: """
+                    'all_events' would move the series' first occurrence, and every later one with it, \
+                    to new_start. Pass the occurrence_date to move from with span 'future_events' instead.
+                    """
+            )
+        }
 
         guard let oldStart = event.startDate else {
             throw MacBridgeError.saveFailed(underlying: "the event has no start date to move")
@@ -339,12 +362,12 @@ public actor CalendarService {
 
         event.startDate = newStart
         event.endDate = newEnd
-        try save(event, span: span)
+        try save(event, span: span.ekSpan)
 
         return .object([
             "rescheduled": .bool(true),
             "moved_from": .string(DateParsing.format(oldStart, allDay: event.isAllDay)),
-            "span": .string(span == .thisEvent ? "this_event" : "future_events"),
+            "span": .string(span.rawValue),
             "event": CalendarMapping.event(event),
         ])
     }
@@ -356,15 +379,15 @@ public actor CalendarService {
     public func cancelEvent(_ args: Arguments) async throws -> Value {
         try await ensureAccess()
 
-        let event = try fetchEvent(args)
         let span = try resolveSpan(args)
+        let event = try fetchEvent(args, span: span)
 
         // Capture the description before removal; the object is dead afterwards.
         let summary = CalendarMapping.event(event)
         let title = event.title ?? "(no title)"
 
         do {
-            try store.remove(event, span: span, commit: true)
+            try store.remove(event, span: span.ekSpan, commit: true)
         } catch {
             throw MacBridgeError.saveFailed(underlying: error.localizedDescription)
         }
@@ -372,7 +395,7 @@ public actor CalendarService {
         return .object([
             "cancelled": .bool(true),
             "title": .string(title),
-            "span": .string(span == .thisEvent ? "this_event" : "future_events"),
+            "span": .string(span.rawValue),
             "event": summary,
         ])
     }
@@ -383,7 +406,7 @@ public actor CalendarService {
     public func openEvent(_ args: Arguments) async throws -> Value {
         try await ensureAccess()
 
-        let event = try fetchEvent(args, requireWritable: false)
+        let event = try fetchEvent(args, span: nil, requireWritable: false)
         guard let identifier = event.eventIdentifier else {
             throw MacBridgeError.notFound(kind: "calendar event", identifier: "identifier missing")
         }
@@ -405,14 +428,23 @@ public actor CalendarService {
         let calendar = Calendar.current
         let now = Date()
 
+        // Never offer a slot that has already started: "today" parses to midnight,
+        // and at 3pm a 9am slot is no use to anyone.
         let startInput = try args.optionalDate("start_date")
-        let searchStart = startInput?.date ?? now
+        let requestedStart = startInput?.date ?? now
+        let searchStart = max(requestedStart, Self.nextQuarterHour(after: now))
         let endInput = try args.optionalDate("end_date")
-        let rawEnd = endInput?.date ?? calendar.date(byAdding: .day, value: 7, to: searchStart) ?? searchStart
+        let rawEnd = endInput?.date ?? calendar.date(byAdding: .day, value: 7, to: requestedStart) ?? requestedStart
         let searchEnd = (endInput?.hasTime ?? false) ? rawEnd : DateParsing.endOfDay(rawEnd)
 
-        guard searchEnd > searchStart else {
+        guard searchEnd > requestedStart else {
             throw MacBridgeError.invalidArgument(name: "end_date", reason: "must be after start_date")
+        }
+        guard searchEnd > searchStart else {
+            throw MacBridgeError.invalidArgument(
+                name: "end_date",
+                reason: "the whole range is in the past; only future times can be offered"
+            )
         }
 
         let duration = try args.int("duration_minutes", default: 30, in: 1...(60 * 24))
@@ -473,15 +505,44 @@ public actor CalendarService {
         ])
     }
 
+    /// `now` rounded up to :00, :15, :30 or :45, so a slot offered for today starts
+    /// at a time a person would propose rather than at 15:07:23.
+    static func nextQuarterHour(after now: Date) -> Date {
+        let quarter: TimeInterval = 15 * 60
+        return Date(timeIntervalSinceReferenceDate:
+            (now.timeIntervalSinceReferenceDate / quarter).rounded(.up) * quarter)
+    }
+
     // MARK: - Shared helpers
+
+    /// Which part of a repeating event a write applies to.
+    enum Span: String {
+        case thisEvent = "this_event"
+        case futureEvents = "future_events"
+        /// The whole series. EventKit has no such span: it is `.futureEvents`
+        /// applied to the first occurrence, which is what `event(withIdentifier:)`
+        /// returns for a repeating event.
+        case allEvents = "all_events"
+
+        var ekSpan: EKSpan { self == .thisEvent ? .thisEvent : .futureEvents }
+    }
 
     /// Look up the event named by `event_id`, accepting either of the parameter
     /// spellings a model is likely to reach for.
-    /// - Parameter requireWritable: false for read-only operations. `calendar_open_event`
-    ///   only reveals an event in Calendar.app, so demanding a writable calendar
-    ///   made it fail with a "read-only" error on exactly the calendars people most
-    ///   often want to look at — subscribed holiday and shared calendars.
-    private func fetchEvent(_ args: Arguments, requireWritable: Bool = true) throws -> EKEvent {
+    ///
+    /// For a repeating event the id names the whole series — every occurrence
+    /// shares it — so `occurrence_date` picks the occurrence. Without one, a write
+    /// used to land on whichever occurrence EventKit returned (the first), and
+    /// "cancel next Tuesday's standup" deleted an old one instead.
+    ///
+    /// - Parameters:
+    ///   - span: the write's span; nil for a read (`calendar_open_event`), which
+    ///     is happy with any occurrence.
+    ///   - requireWritable: false for read-only operations. `calendar_open_event`
+    ///     only reveals an event in Calendar.app, so demanding a writable calendar
+    ///     made it fail with a "read-only" error on exactly the calendars people most
+    ///     often want to look at — subscribed holiday and shared calendars.
+    private func fetchEvent(_ args: Arguments, span: Span?, requireWritable: Bool = true) throws -> EKEvent {
         let identifier = try args.contains("event_id")
             ? args.requiredString("event_id")
             : args.requiredString("id")
@@ -492,20 +553,133 @@ public actor CalendarService {
         if requireWritable, let cal = event.calendar {
             try CalendarResolution.requireWritable(cal, kind: "calendar")
         }
-        return event
+
+        guard Self.repeats(event) else { return event }
+
+        // An occurrence moved on its own gets an id of its own (the series id plus
+        // a recurrence-id suffix), and search returns that id for it, so the id
+        // alone already names it.
+        // Keyed on the id the caller sent, not just the event returned: should a
+        // lookup by series id ever answer with a moved first occurrence, a write
+        // must still demand occurrence_date rather than land on that one.
+        if event.isDetached && !event.hasRecurrenceRules && event.eventIdentifier == identifier {
+            if span == .allEvents {
+                throw MacBridgeError.invalidArgument(
+                    name: "span",
+                    reason: """
+                        this id names one occurrence that was moved on its own. To change the whole \
+                        series, use the id of one of its other occurrences.
+                        """
+                )
+            }
+            return event
+        }
+        guard let span, span != .allEvents else { return event }
+
+        guard let occurrence = try args.optionalDate("occurrence_date") else {
+            throw MacBridgeError.invalidArgument(
+                name: "occurrence_date",
+                reason: """
+                    '\(event.title ?? "this event")' repeats, and every occurrence shares this id. \
+                    Pass the occurrence_date from calendar_search_events to choose the occurrence, \
+                    or span 'all_events' to change the whole series.
+                    """
+            )
+        }
+        return try findOccurrence(of: event, identifier: identifier, at: occurrence.date)
     }
 
-    private func resolveSpan(_ args: Arguments) throws -> EKSpan {
+    /// The occurrence of a repeating event that starts (or originally started, if
+    /// it was moved on its own) at `date`.
+    ///
+    /// Occurrences are matched by `occurrenceMatcher(for:identifier:)`: the series
+    /// id, or for one moved on its own, the id it derives from the series id.
+    private func findOccurrence(of series: EKEvent, identifier: String, at date: Date) throws -> EKEvent {
+        let day: TimeInterval = 24 * 3600
+        let predicate = store.predicateForEvents(
+            withStart: date.addingTimeInterval(-day),
+            end: date.addingTimeInterval(day),
+            calendars: series.calendar.map { [$0] }
+        )
+        // Within a second, because a model echoes the formatted value back and
+        // formatting drops sub-second precision.
+        func near(_ other: Date?) -> Bool { other.map { abs($0.timeIntervalSince(date)) < 1 } ?? false }
+
+        let belongs = Self.occurrenceMatcher(for: series, identifier: identifier)
+        let candidates = store.events(matching: predicate).filter(belongs)
+        guard let match = candidates.first(where: { near($0.occurrenceDate) })
+            ?? candidates.first(where: { near($0.startDate) })
+            ?? movedOccurrence(matching: belongs, originallyAt: date, in: series.calendar)
+        else {
+            throw MacBridgeError.invalidArgument(
+                name: "occurrence_date",
+                reason: """
+                    this event has no occurrence at \(DateParsing.offsetDateTime.string(from: date)). \
+                    Take occurrence_date from the event as calendar_search_events returns it.
+                    """
+            )
+        }
+        return match
+    }
+
+    /// An occurrence moved on its own keeps its original `occurrenceDate`, which
+    /// is what search reports, but now starts elsewhere — a Tuesday meeting moved
+    /// to Thursday is outside the narrow window above. Search a year either side,
+    /// well inside EventKit's four-year limit, matching the original date only.
+    private func movedOccurrence(
+        matching belongs: (EKEvent) -> Bool,
+        originallyAt date: Date,
+        in calendar: EKCalendar?
+    ) -> EKEvent? {
+        let year: TimeInterval = 366 * 24 * 3600
+        let predicate = store.predicateForEvents(
+            withStart: date.addingTimeInterval(-year),
+            end: date.addingTimeInterval(year),
+            calendars: calendar.map { [$0] }
+        )
+        return store.events(matching: predicate).first {
+            belongs($0) && $0.occurrenceDate.map { abs($0.timeIntervalSince(date)) < 1 } == true
+        }
+    }
+
+    /// Whether an event is an occurrence of `series`: it has the series id, or it
+    /// is a moved occurrence of it.
+    ///
+    /// A moved occurrence's id is the series id plus a `/RID=<seconds>` suffix
+    /// (seen on macOS 26/27; not documented, so the shared iCalendar UID is checked
+    /// too). Both are only trusted within the series' own calendar, which callers
+    /// already restrict the search to.
+    private static func occurrenceMatcher(for series: EKEvent, identifier: String) -> (EKEvent) -> Bool {
+        let uid = series.calendarItemExternalIdentifier
+        let movedPrefix = identifier + "/RID="
+        return { candidate in
+            guard let candidateID = candidate.eventIdentifier else { return false }
+            if candidateID == identifier { return true }
+            guard candidate.isDetached else { return false }
+            if candidateID.hasPrefix(movedPrefix) { return true }
+            guard let uid else { return false }
+            return candidate.calendarItemExternalIdentifier == uid
+        }
+    }
+
+    private func resolveSpan(_ args: Arguments) throws -> Span {
         guard let raw = args.optionalString("span") else { return .thisEvent }
         switch raw.lowercased() {
         case "this", "this_event": return .thisEvent
-        case "future", "future_events", "all": return .futureEvents
+        case "future", "future_events": return .futureEvents
+        case "all", "all_events", "series": return .allEvents
         default:
             throw MacBridgeError.invalidArgument(
                 name: "span",
-                reason: "expected 'this_event' or 'future_events'"
+                reason: "expected 'this_event', 'future_events' or 'all_events'"
             )
         }
+    }
+
+    /// A series, or one occurrence of one. A detached occurrence counts, though
+    /// it has no recurrence rules and an id of its own.
+    private static func repeats(_ event: EKEvent) -> Bool {
+        event.hasRecurrenceRules || event.isDetached
     }
 
     private func save(_ event: EKEvent, span: EKSpan) throws {

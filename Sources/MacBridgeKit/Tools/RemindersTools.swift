@@ -99,6 +99,7 @@ enum RemindersTools {
                         "url": Schema.string("A new URL; empty string clears it."),
                         "list": Schema.string("Move the reminder to this list, by name or id."),
                         "completed": Schema.boolean("Mark complete or incomplete."),
+                        "alarm": Schema.boolean("When due moves to a time, add an alert at the new time.", default: true),
                     ],
                     required: ["reminder_id"]
                 ),

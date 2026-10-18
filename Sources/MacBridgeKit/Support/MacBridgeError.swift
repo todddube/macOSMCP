@@ -28,6 +28,9 @@ public enum MacBridgeError: Error, LocalizedError, Equatable {
     case saveFailed(underlying: String)
     /// A tool name reached the registry with no handler.
     case unknownTool(String)
+    /// The call carried argument names the tool does not take. `suggestions` maps
+    /// each unknown name to the likeliest intended one, where there is one.
+    case unknownArguments(tool: String, names: [String], suggestions: [String: String], accepted: [String])
 
     public var errorDescription: String? {
         switch self {
@@ -52,6 +55,15 @@ public enum MacBridgeError: Error, LocalizedError, Equatable {
             return "macOS rejected the change: \(underlying)"
         case .unknownTool(let name):
             return "Unknown tool '\(name)'."
+        case .unknownArguments(let tool, let names, let suggestions, let accepted):
+            let listed = names.map { name in
+                suggestions[name].map { "'\(name)' (did you mean '\($0)'?)" } ?? "'\(name)'"
+            }
+            let noun = names.count == 1 ? "argument" : "arguments"
+            return """
+                \(tool) does not take the \(noun) \(listed.joined(separator: ", ")), and nothing was changed. \
+                It accepts: \(accepted.joined(separator: ", ")).
+                """
         }
     }
 }

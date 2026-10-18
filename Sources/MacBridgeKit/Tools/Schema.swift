@@ -84,6 +84,6 @@ public enum Schema {
     /// The date format blurb, repeated so each parameter is self-documenting
     /// without the model having to read the server instructions.
     public static let dateFormats =
-        "Accepts YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, a full ISO-8601 timestamp, "
-        + "or a relative value: today, tomorrow, yesterday, now, +7d, -3d, +2w."
+        "Accepts YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS] (local time), a full ISO-8601 timestamp, "
+        + "or a relative value: today, tomorrow, yesterday, now, +7d, -3d, +2w, +1mo, +2h, +30min."
 }

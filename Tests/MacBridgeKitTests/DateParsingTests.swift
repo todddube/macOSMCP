@@ -74,7 +74,7 @@ struct DateParsingTests {
         ("+7d", Calendar.Component.day, 7),
         ("-3d", .day, -3),
         ("+2w", .day, 14),
-        ("+1m", .month, 1),
+        ("+1mo", .month, 1),
         ("+1y", .year, 1),
     ])
     func relativeOffsets(token: String, unit: Calendar.Component, expected: Int) throws {
@@ -87,9 +87,49 @@ struct DateParsingTests {
 
     @Test("Unparseable input is rejected rather than guessed at", arguments: [
         "", "   ", "next tuesday", "28/09/2026", "tomorrow afternoon", "+d", "+3q", "2026-13-45",
+        "2026-02-30", "2026-09-28T24:00", "2026-09-28T12:60:00", "2026-09-28T", "2026-09-28T12",
+        // Minutes or months? Refused rather than guessed.
+        "+1m",
     ])
     func rejectsGarbage(bad: String) {
         #expect(DateParsing.parse(bad) == nil, "should not have parsed '\(bad)'")
+    }
+
+    @Test("The date-time shapes models emit all read as the same local time", arguments: [
+        "2026-09-28T15:30", "2026-09-28 15:30", "2026-09-28T15:30:00", "2026-09-28 15:30:00",
+        "2026-09-28T15:30:00.000", "2026-09-28t15:30",
+    ])
+    func lenientLocalShapes(input: String) throws {
+        let parsed = try #require(DateParsing.parse(input), "should have parsed '\(input)'")
+        #expect(parsed.hasTime)
+        let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: parsed.date)
+        #expect([c.year, c.month, c.day, c.hour, c.minute, c.second] == [2026, 9, 28, 15, 30, 0])
+    }
+
+    @Test("A single-digit hour is read, as models often write one")
+    func singleDigitHour() throws {
+        let parsed = try #require(DateParsing.parse("2026-09-28 9:05"))
+        #expect(Calendar.current.dateComponents([.hour, .minute], from: parsed.date) == DateComponents(hour: 9, minute: 5))
+    }
+
+    @Test("Offsets are honoured with or without seconds and colons")
+    func offsetShapes() throws {
+        let expected = try #require(DateParsing.parse("2026-09-28T12:00:00Z")).date
+        for input in ["2026-09-28T14:00+02:00", "2026-09-28T14:00:00+0200", "2026-09-28T14:00+02",
+                      "2026-09-28T12:00Z", "2026-09-28 07:00:00-05:00"] {
+            #expect(DateParsing.parse(input)?.date == expected, "'\(input)'")
+        }
+    }
+
+    @Test("Hour and minute offsets keep the time of day")
+    func timedOffsets() throws {
+        let now = try #require(DateParsing.parse("2026-09-28T13:10:00")).date
+        let inTwoHours = try #require(DateParsing.parse("+2h", now: now))
+        #expect(inTwoHours.hasTime)
+        #expect(inTwoHours.date.timeIntervalSince(now) == 2 * 3600)
+
+        let halfHourAgo = try #require(DateParsing.parse("-30min", now: now))
+        #expect(halfHourAgo.date.timeIntervalSince(now) == -30 * 60)
     }
 
     @Test("Formatting round-trips through the parser")
