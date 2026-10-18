@@ -26,6 +26,11 @@ enum CalendarTools {
             + "calendar_search_events returned it. Required for a repeating event unless span is all_events."
     )
 
+    static let availabilityParameter = Schema.string(
+        "Whether the event shows as busy to people checking the user's free time.",
+        options: ["busy", "free", "tentative", "unavailable"]
+    )
+
     /// Every Calendar tool, in the order `tools/list` returns them.
     static func definitions() -> [Tool] {
         [
@@ -48,9 +53,13 @@ enum CalendarTools {
                     as "today"; for a search pass a query with a wide range. \
                     Every event includes an "id" required by the update, reschedule and cancel tools. \
                     A repeating event's occurrences all share one id and differ by "occurrence_date", \
-                    which those tools also need to act on one occurrence.
+                    which those tools also need to act on one occurrence. \
+                    Pass event_id for one event in full: attendees and their replies, alerts, and availability.
                     """,
                 inputSchema: Schema.object(properties: [
+                    "event_id": Schema.string("Return just this event, with attendees and alerts. Pass occurrence_date too for one occurrence of a repeating event."),
+                    "occurrence_date": Schema.string("With event_id: the occurrence of a repeating event to return, as search returned it."),
+                    "include_details": Schema.boolean("Include attendees, alerts and availability for every event.", default: false),
                     "query": Schema.string("Case-insensitive text matched against title, location and notes."),
                     "start_date": Schema.string("Start of the range, inclusive. Defaults to today. \(Schema.dateFormats)"),
                     "end_date": Schema.string("End of the range, inclusive. Defaults to the end of the 7th day, counting start_date's day as the first. \(Schema.dateFormats)"),
@@ -79,6 +88,7 @@ enum CalendarTools {
                         "notes": Schema.string("Free-text notes on the event."),
                         "url": Schema.string("A URL to attach, such as a meeting link."),
                         "alarm_minutes_before": Schema.integer("Add an alert this many minutes before the start.", minimum: 0),
+                        "availability": availabilityParameter,
                         "recurrence": Schema.string("Repeat frequency.", options: ["daily", "weekly", "monthly", "yearly", "none"]),
                         "recurrence_interval": Schema.integer("Repeat every N periods, e.g. 2 with weekly means fortnightly.", default: 1, minimum: 1),
                         "recurrence_count": Schema.integer("Stop after this many occurrences.", minimum: 1),
@@ -92,8 +102,8 @@ enum CalendarTools {
             Tool(
                 name: "calendar_update_event",
                 description: """
-                    Change fields on an existing event. Omitted fields are left alone; passing an empty \
-                    string or null for location, notes or url clears it. \
+                    Change fields on an existing event, including its alerts and how it repeats. Omitted \
+                    fields are left alone; passing an empty string or null for location, notes or url clears it. \
                     To move an event in time prefer calendar_reschedule_event, which preserves its duration.
                     """,
                 inputSchema: Schema.object(
@@ -107,6 +117,19 @@ enum CalendarTools {
                         "location": Schema.string("A new location; empty string clears it."),
                         "notes": Schema.string("New notes; empty string clears them."),
                         "url": Schema.string("A new URL; empty string clears it."),
+                        "availability": availabilityParameter,
+                        "alarm_minutes_before": Schema.integer(
+                            "Replace the event's alerts before the start with one this many minutes before; null removes them.",
+                            minimum: 0
+                        ),
+                        "recurrence": Schema.string(
+                            "Make the event repeat, change how often, or stop it with none. Removes occurrences that no "
+                                + "longer fit, so for a repeating event it needs span future_events or all_events.",
+                            options: ["daily", "weekly", "monthly", "yearly", "none"]
+                        ),
+                        "recurrence_interval": Schema.integer("Repeat every N periods; the rest of the repeat is kept.", minimum: 1),
+                        "recurrence_count": Schema.integer("End the repeat after this many occurrences; null repeats forever.", minimum: 1),
+                        "recurrence_until": Schema.string("End the repeat on this date; null repeats forever. \(Schema.dateFormats)"),
                         "occurrence_date": occurrenceParameter,
                         "span": Schema.string(
                             "For a repeating event: this occurrence only, this and all later ones, or the whole series "
@@ -177,7 +200,9 @@ enum CalendarTools {
                     Find free gaps of at least duration_minutes within working hours, across the given \
                     calendars. Use this before proposing a meeting time instead of reading events and \
                     reasoning about gaps. Events marked "free" and cancelled events do not block; \
-                    all-day events block their whole span.
+                    all-day events block their whole span. Birthdays, and all-day events on subscribed \
+                    calendars such as public holidays, don't block unless include_subscribed is true or \
+                    calendars names them.
                     """,
                 inputSchema: Schema.object(
                     properties: [
@@ -187,6 +212,7 @@ enum CalendarTools {
                         "day_start_hour": Schema.integer("First hour of the working day, 0–23.", default: 9, minimum: 0, maximum: 23),
                         "day_end_hour": Schema.integer("Last hour of the working day, 1–24.", default: 17, minimum: 1, maximum: 24),
                         "calendars": Schema.stringList("Only treat these calendars as blocking."),
+                        "include_subscribed": Schema.boolean("Let birthdays and all-day events on subscribed calendars, such as holidays, block time too.", default: false),
                         "limit": Schema.integer("Maximum slots to return.", default: 20, minimum: 1, maximum: 200),
                     ]
                 ),

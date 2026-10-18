@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import MCP
 
 /// What connected clients may do, as the user set it in the menu-bar panel.
 ///
@@ -42,11 +43,16 @@ public struct AccessPolicy: Equatable, Sendable {
     }
 
     /// The decision for a call to `tool`.
-    public func decision(for tool: String) -> Decision {
+    ///
+    /// `.confirm` means the call may remove data; the caller asks
+    /// ``ToolRegistry/confirmation(_:arguments:)`` whether it really does.
+    /// `arguments` has no default: left out, a repeat change would be allowed
+    /// without asking.
+    public func decision(for tool: String, arguments: [String: Value]?) -> Decision {
         if readOnly && ToolRegistry.changesData(tool) {
             return .refuse(Self.readOnlyRefusal(tool))
         }
-        if confirmDestructive && ToolRegistry.destructiveToolNames.contains(tool) {
+        if confirmDestructive && ToolRegistry.mayRemoveData(tool, arguments: arguments) {
             return .confirm
         }
         return .allow

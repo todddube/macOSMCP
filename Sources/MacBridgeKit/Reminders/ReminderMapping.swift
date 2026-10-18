@@ -76,6 +76,7 @@ enum ReminderMapping {
         }
         if reminder.hasRecurrenceRules {
             out["recurring"] = .bool(true)
+            if let rule = Recurrence.describe(reminder) { out["repeats"] = .string(rule) }
         }
         if let alarms = reminder.alarms, !alarms.isEmpty {
             out["alarm_count"] = .int(alarms.count)

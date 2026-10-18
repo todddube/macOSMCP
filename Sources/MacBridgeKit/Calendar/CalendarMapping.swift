@@ -76,6 +76,7 @@ enum CalendarMapping {
         }
         if event.hasRecurrenceRules {
             out["recurring"] = .bool(true)
+            if let rule = Recurrence.describe(event) { out["repeats"] = .string(rule) }
         }
         if event.isDetached {
             out["detached"] = .bool(true)
@@ -91,6 +92,72 @@ enum CalendarMapping {
         }
         if let attendees = event.attendees, !attendees.isEmpty {
             out["attendee_count"] = .int(attendees.count)
+            // The answer to "which invites haven't I replied to", without the whole list.
+            if let me = attendees.first(where: \.isCurrentUser) {
+                out["my_response"] = .string(describe(me.participantStatus))
+            }
+        }
+        return .object(out)
+    }
+
+    /// ``event(_:)`` plus who is invited, the alerts and whether it shows as busy.
+    ///
+    /// Kept out of the default result: a week of meetings with every attendee
+    /// listed is mostly noise, and costs the model's context for nothing.
+    static func eventDetails(_ event: EKEvent) -> Value {
+        guard case .object(var out) = CalendarMapping.event(event) else { return CalendarMapping.event(event) }
+
+        if event.availability != .notSupported {
+            out["availability"] = .string(describe(event.availability))
+        }
+        if let organizer = event.organizer {
+            if let email = email(of: organizer) { out["organizer_email"] = .string(email) }
+            if organizer.isCurrentUser { out["organizer_is_me"] = .bool(true) }
+        }
+        if let attendees = event.attendees, !attendees.isEmpty {
+            out["attendees"] = .array(attendees.map(attendee))
+        }
+        out["alarms"] = .array((event.alarms ?? []).map(alarm))
+        if let zone = event.timeZone, !event.isAllDay {
+            out["time_zone"] = .string(zone.identifier)
+        }
+        return .object(out)
+    }
+
+    /// One invitee.
+    static func attendee(_ person: EKParticipant) -> Value {
+        var out: [String: Value] = [
+            "response": .string(describe(person.participantStatus)),
+            "role": .string(describe(person.participantRole)),
+        ]
+        if let name = person.name, !name.isEmpty { out["name"] = .string(name) }
+        if let email = email(of: person) { out["email"] = .string(email) }
+        if person.participantType != .person, person.participantType != .unknown {
+            out["type"] = .string(describe(person.participantType))
+        }
+        if person.isCurrentUser { out["is_me"] = .bool(true) }
+        return .object(out)
+    }
+
+    /// A participant's address, from its `mailto:` URL; nil for other kinds.
+    static func email(of person: EKParticipant) -> String? {
+        let url = person.url
+        guard url.scheme?.lowercased() == "mailto" else { return nil }
+        let address = url.absoluteString.dropFirst("mailto:".count)
+        return address.isEmpty ? nil : (address.removingPercentEncoding ?? String(address))
+    }
+
+    /// One alert: minutes before the start, an absolute time, or a place.
+    static func alarm(_ alarm: EKAlarm) -> Value {
+        var out: [String: Value] = [:]
+        if let place = alarm.structuredLocation?.title {
+            out["location"] = .string(place)
+            out["when"] = .string(alarm.proximity == .leave ? "leaving" : "arriving")
+        } else if let date = alarm.absoluteDate {
+            out["at"] = .string(DateParsing.offsetDateTime.string(from: date))
+        } else {
+            // EventKit stores "before" as a negative offset in seconds.
+            out["minutes_before"] = .int(Int((-alarm.relativeOffset / 60).rounded()))
         }
         return .object(out)
     }
@@ -117,6 +184,53 @@ enum CalendarMapping {
         case .tentative: return "tentative"
         case .canceled: return "canceled"
         @unknown default: return "unknown"
+        }
+    }
+
+    static func describe(_ status: EKParticipantStatus) -> String {
+        switch status {
+        case .unknown: return "unknown"
+        case .pending: return "not_responded"
+        case .accepted: return "accepted"
+        case .declined: return "declined"
+        case .tentative: return "tentative"
+        case .delegated: return "delegated"
+        case .completed: return "completed"
+        case .inProcess: return "in_process"
+        @unknown default: return "unknown"
+        }
+    }
+
+    static func describe(_ role: EKParticipantRole) -> String {
+        switch role {
+        case .unknown: return "unknown"
+        case .required: return "required"
+        case .optional: return "optional"
+        case .chair: return "chair"
+        case .nonParticipant: return "non_participant"
+        @unknown default: return "unknown"
+        }
+    }
+
+    static func describe(_ type: EKParticipantType) -> String {
+        switch type {
+        case .unknown: return "unknown"
+        case .person: return "person"
+        case .room: return "room"
+        case .resource: return "resource"
+        case .group: return "group"
+        @unknown default: return "unknown"
+        }
+    }
+
+    /// The `availability` values a tool accepts, in EventKit's terms.
+    static func parseAvailability(_ text: String) -> EKEventAvailability? {
+        switch text.lowercased() {
+        case "busy": return .busy
+        case "free": return .free
+        case "tentative": return .tentative
+        case "unavailable", "out_of_office", "away": return .unavailable
+        default: return nil
         }
     }
 

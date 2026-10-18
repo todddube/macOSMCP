@@ -83,6 +83,16 @@ public actor CalendarService {
     public func searchEvents(_ args: Arguments) async throws -> Value {
         try await ensureAccess()
 
+        // One event, in full: the counterpart of reminders_search_reminders'
+        // reminder_id, and the way to see who is invited to a meeting.
+        if args.contains("event_id") {
+            let event = try fetchEvent(args, span: nil, requireWritable: false)
+            return .object(["events": .array([CalendarMapping.eventDetails(event)]), "count": .int(1)])
+        }
+        let mapEvent = try args.bool("include_details", default: false)
+            ? CalendarMapping.eventDetails
+            : CalendarMapping.event
+
         let now = Date()
         let calendar = Calendar.current
 
@@ -143,7 +153,7 @@ public actor CalendarService {
         let page = Array(events.prefix(limit))
 
         var out: [String: Value] = [
-            "events": .array(page.map(CalendarMapping.event)),
+            "events": .array(page.map(mapEvent)),
             "count": .int(page.count),
             "start": .string(DateParsing.offsetDateTime.string(from: start)),
             "end": .string(DateParsing.offsetDateTime.string(from: end)),
@@ -207,19 +217,39 @@ public actor CalendarService {
         if let notes = args.optionalString("notes") { event.notes = notes }
         if let url = try args.optionalURL("url") { event.url = url }
         if let rule = try Recurrence.rule(from: args) { event.addRecurrenceRule(rule) }
+        try applyAvailability(args, to: event)
         // Bounded: `abs(Int.min)` and `minutes * 60` both trap on extreme input,
         // and a year of lead time is already absurd for an alarm.
-        if let minutes = try args.optionalInt("alarm_minutes_before", in: 0...Self.maxMinutes) {
-            event.addAlarm(EKAlarm(relativeOffset: TimeInterval(-minutes * 60)))
+        let alarmMinutes = try args.optionalInt("alarm_minutes_before", in: 0...Self.maxMinutes)
+        if let alarmMinutes {
+            event.addAlarm(EKAlarm(relativeOffset: TimeInterval(-alarmMinutes * 60)))
         }
 
         try save(event, span: .futureEvents)
+
+        // Saving adds the account's default alert (Calendar's "Default alert"
+        // setting), so asking for 10 minutes left two alerts, 10 and 15, and
+        // asking for 15 left two at 15. An alert asked for replaces the default.
+        // The event already exists by now, so a failure here must not read as a
+        // failed create, or the model would try again and make a second one.
+        var warning: String?
+        if let alarmMinutes, keepOnlyAlarm(minutesBefore: alarmMinutes, on: event) {
+            do {
+                try save(event, span: .futureEvents)
+            } catch {
+                // Back to what was stored, so the result shows the alerts it has.
+                event.rollback()
+                warning = "The event was created, but Calendar's default alert may also be on it."
+            }
+        }
         calendarCache = nil
 
-        return .object([
+        var out: [String: Value] = [
             "created": .bool(true),
             "event": CalendarMapping.event(event),
-        ])
+        ]
+        if let warning { out["warning"] = .string(warning) }
+        return .object(out)
     }
 
     /// Resolve an event's end from `end` or `duration_minutes`, defaulting to a
@@ -251,7 +281,10 @@ public actor CalendarService {
         try await ensureAccess()
 
         let span = try resolveSpan(args)
+        let changesRepeat = Recurrence.isRequested(in: args)
+        if changesRepeat, span == .thisEvent { try requireSeriesSpanForRepeatChange(args) }
         let event = try fetchEvent(args, span: span)
+        if changesRepeat, span == .thisEvent, Self.repeats(event) { try refuseRepeatChange(on: event) }
         if span == .allEvents, Self.repeats(event),
            let moved = ["start", "end", "all_day"].first(where: args.contains) {
             throw MacBridgeError.invalidArgument(
@@ -330,7 +363,19 @@ public actor CalendarService {
             event.calendar = cal
         }
 
-        try save(event, span: span.ekSpan)
+        try applyAvailability(args, to: event)
+        try applyAlarm(args, to: event)
+
+        // A repeat belongs to the series from this occurrence on, so it is always
+        // saved that way; for an event that didn't repeat the span makes no
+        // difference.
+        var saveSpan = span.ekSpan
+        if changesRepeat {
+            try applyRepeat(args, to: event, splitsSeries: span == .futureEvents && !isFirstOccurrence(event))
+            saveSpan = .futureEvents
+        }
+
+        try save(event, span: saveSpan)
 
         return .object([
             "updated": .bool(true),
@@ -442,10 +487,66 @@ public actor CalendarService {
             switch span {
             case .thisEvent: text += " (this occurrence only)"
             case .futureEvents: text += ", and every later occurrence"
-            case .allEvents: text += ", and every occurrence of the repeating series"
+            case .allEvents:
+                // Calendar keeps a part split off by an earlier "from this one on"
+                // change tied to the series, and deleting the series takes it too.
+                text += ", and every occurrence of the repeating series, including any later part split off by an earlier repeat change"
             }
         }
         return text
+    }
+
+    /// What changing a repeating event's repeat would remove, in words for the
+    /// confirmation prompt. `needed` is false when the event doesn't repeat, since
+    /// nothing can be lost, and when the call would refuse anyway; it is true with
+    /// no target only when Calendar access itself can't be checked.
+    ///
+    /// Stopping a repeat or changing its rule removes the occurrences that no
+    /// longer fit, from the chosen one on, so with Ask before deleting on this is
+    /// confirmed like a delete.
+    public func repeatChangeTarget(_ args: Arguments) async -> (needed: Bool, target: String?) {
+        guard Recurrence.isRequested(in: args) else { return (false, nil) }
+        guard (try? await ensureAccess()) != nil else { return (true, nil) }
+
+        // Each check below matches one the call makes itself, which refuses a
+        // repeat change on a single occurrence and an event it can't find; asking
+        // first would hold the user up for an error. They look at the event the
+        // call would write, as the call resolves it, not at whatever the bare id
+        // names.
+        guard let span = try? resolveSpan(args), span != .thisEvent,
+              let event = try? fetchEvent(args, span: span)
+        else { return (false, nil) }
+        // Making a one-off event repeat loses nothing, and one occurrence moved on
+        // its own has no repeat to change, which the call refuses.
+        guard event.hasRecurrenceRules else { return (false, nil) }
+
+        let title = "\u{201C}\(event.title ?? "(no title)")\u{201D}"
+        var from = ""
+        if let start = event.startDate {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            from = " after \(formatter.string(from: start))"
+        }
+        // Arguments the call would refuse aren't worth asking about either.
+        let change: Recurrence.Change?
+        do {
+            change = try Recurrence.change(
+                from: args,
+                existing: event.recurrenceRules?.first,
+                splitsSeries: span == .futureEvents && !isFirstOccurrence(event)
+            )
+        } catch {
+            return (false, nil)
+        }
+        switch change {
+        case .remove:
+            return (true, "every occurrence of \(title)\(from), since it would stop repeating")
+        case .set(let rule):
+            return (true, "any occurrence of \(title)\(from) that doesn't fit the new repeat (\(Recurrence.describe(rule)))")
+        case nil:
+            return (false, nil)
+        }
     }
 
     // MARK: - calendar_open_event
@@ -512,6 +613,15 @@ public actor CalendarService {
             kind: "calendar"
         )
 
+        // Birthdays, and the all-day entries on subscribed calendars — public
+        // holidays, mostly — would block whole days: one holiday in the range and
+        // that day offered nothing, though most people work it. Timed events on
+        // a subscribed calendar still block, since a subscribed work or team
+        // calendar holds real meetings. Left in when asked for, or when the
+        // calendars are named.
+        let skipBackground = try names == nil && !args.bool("include_subscribed", default: false)
+        var ignored: Set<String> = []
+
         // Busy = anything not explicitly marked free. All-day events block their
         // whole span, which is what a model should assume when offering times.
         var busy: [DateInterval] = []
@@ -519,6 +629,12 @@ public actor CalendarService {
             let predicate = store.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: calendars)
             for event in store.events(matching: predicate) {
                 guard event.availability != .free, event.status != .canceled else { continue }
+                // After the free check, so the note names only calendars that
+                // would otherwise have blocked time.
+                if skipBackground, let calendar = event.calendar, Self.isBackground(event, in: calendar) {
+                    ignored.insert(calendar.title)
+                    continue
+                }
                 guard let s = event.startDate, let e = event.endDate, e > s else { continue }
                 busy.append(DateInterval(start: s, end: e))
             }
@@ -543,14 +659,29 @@ public actor CalendarService {
             if slots.count >= limit { break }
         }
 
-        return .object([
+        var out: [String: Value] = [
             "slots": .array(slots),
             "count": .int(slots.count),
             "requested_duration_minutes": .int(duration),
             "searched_from": .string(DateParsing.offsetDateTime.string(from: searchStart)),
             "searched_to": .string(DateParsing.offsetDateTime.string(from: searchEnd)),
             "working_hours": .string(String(format: "%02d:00–%02d:00", dayStart, dayEnd)),
-        ])
+        ]
+        if !ignored.isEmpty {
+            out["ignored"] = .string(
+                "Birthdays and all-day events on subscribed calendars (\(ignored.sorted().joined(separator: ", "))) "
+                    + "were not counted as busy. Pass include_subscribed to count them."
+            )
+        }
+        return .object(out)
+    }
+
+    /// Something that happens *around* the user rather than to them, so doesn't
+    /// make them busy: a birthday, or an all-day entry such as a public holiday
+    /// on a subscribed calendar.
+    static func isBackground(_ event: EKEvent, in calendar: EKCalendar) -> Bool {
+        if calendar.type == .birthday { return true }
+        return event.isAllDay && (calendar.type == .subscription || calendar.isSubscribed)
     }
 
     /// `now` rounded up to :00, :15, :30 or :45, so a slot offered for today starts
@@ -559,6 +690,135 @@ public actor CalendarService {
         let quarter: TimeInterval = 15 * 60
         return Date(timeIntervalSinceReferenceDate:
             (now.timeIntervalSinceReferenceDate / quarter).rounded(.up) * quarter)
+    }
+
+    // MARK: - Optional fields on create and update
+
+    /// Set whether the event shows as busy, from `availability`.
+    private func applyAvailability(_ args: Arguments, to event: EKEvent) throws {
+        guard let text = args.optionalString("availability") else { return }
+        guard let availability = CalendarMapping.parseAvailability(text) else {
+            throw MacBridgeError.invalidArgument(
+                name: "availability",
+                reason: "expected busy, free, tentative or unavailable"
+            )
+        }
+        // Exchange and some CalDAV servers support only some values; EventKit
+        // would otherwise save and quietly keep the old one.
+        if let calendar = event.calendar,
+           !Self.supports(availability, in: calendar.supportedEventAvailabilities) {
+            throw MacBridgeError.invalidArgument(
+                name: "availability",
+                reason: "the calendar \u{201C}\(calendar.title)\u{201D} doesn't support '\(text)'"
+            )
+        }
+        event.availability = availability
+    }
+
+    private static func supports(_ availability: EKEventAvailability, in mask: EKCalendarEventAvailabilityMask) -> Bool {
+        switch availability {
+        case .busy: return mask.contains(.busy)
+        case .free: return mask.contains(.free)
+        case .tentative: return mask.contains(.tentative)
+        case .unavailable: return mask.contains(.unavailable)
+        default: return false
+        }
+    }
+
+    /// Replace the event's alerts before the start with the one in
+    /// `alarm_minutes_before`; null or "" removes them. Alerts at a fixed time or a
+    /// place are kept.
+    private func applyAlarm(_ args: Arguments, to event: EKEvent) throws {
+        guard args.contains("alarm_minutes_before") else { return }
+        let minutes: Int?
+        if args.isExplicitNull("alarm_minutes_before") || args.clearableString("alarm_minutes_before") == "" {
+            minutes = nil
+        } else {
+            minutes = try args.optionalInt("alarm_minutes_before", in: 0...Self.maxMinutes)
+        }
+        for alarm in event.alarms ?? [] where alarm.absoluteDate == nil && alarm.structuredLocation == nil {
+            event.removeAlarm(alarm)
+        }
+        if let minutes {
+            event.addAlarm(EKAlarm(relativeOffset: TimeInterval(-minutes * 60)))
+        }
+    }
+
+    /// Remove every alert before the start except one at `minutesBefore`.
+    /// Returns whether anything was removed.
+    private func keepOnlyAlarm(minutesBefore: Int, on event: EKEvent) -> Bool {
+        let wanted = TimeInterval(-minutesBefore * 60)
+        var kept = false
+        var removed = false
+        for alarm in event.alarms ?? [] where alarm.absoluteDate == nil && alarm.structuredLocation == nil {
+            if alarm.relativeOffset == wanted && !kept {
+                kept = true
+            } else {
+                event.removeAlarm(alarm)
+                removed = true
+            }
+        }
+        return removed
+    }
+
+    /// Apply the repeat an update asks for.
+    private func applyRepeat(_ args: Arguments, to event: EKEvent, splitsSeries: Bool) throws {
+        if event.isDetached && !event.hasRecurrenceRules { try refuseRepeatChange(on: event) }
+        switch try Recurrence.change(
+            from: args, existing: event.recurrenceRules?.first, splitsSeries: splitsSeries
+        ) {
+        case .remove:
+            for rule in event.recurrenceRules ?? [] { event.removeRecurrenceRule(rule) }
+        case .set(let rule):
+            event.recurrenceRules = [rule]
+        case nil:
+            break
+        }
+    }
+
+    /// Refuse a repeat change on one occurrence before asking for its
+    /// occurrence_date, whose absence would otherwise be the error reported.
+    /// The fetched event is checked again by ``refuseRepeatChange(on:)``.
+    private func requireSeriesSpanForRepeatChange(_ args: Arguments) throws {
+        guard let identifier = args.optionalString("event_id") ?? args.optionalString("id"),
+              let event = store.event(withIdentifier: identifier),
+              Self.repeats(event)
+        else { return }
+        try refuseRepeatChange(on: event)
+    }
+
+    /// The error for a repeat change aimed at one occurrence: a repeat belongs to
+    /// a run of occurrences, so it needs span future_events or all_events. One
+    /// moved on its own has no repeat of its own to change.
+    private func refuseRepeatChange(on event: EKEvent) throws -> Never {
+        if event.isDetached && !event.hasRecurrenceRules {
+            throw MacBridgeError.invalidArgument(
+                name: "recurrence",
+                reason: """
+                    this occurrence was moved on its own, so it has no repeat to change. \
+                    Change the repeat through one of the series' other occurrences.
+                    """
+            )
+        }
+        throw MacBridgeError.invalidArgument(
+            name: "span",
+            reason: """
+                changing how an event repeats applies from one occurrence on, not to a single one. \
+                Pass span 'future_events' with that occurrence's occurrence_date, or 'all_events' \
+                for the whole series.
+                """
+        )
+    }
+
+    /// Whether `event` is its series' first occurrence, which
+    /// `event(withIdentifier:)` returns. Unsure counts as not first, so a kept
+    /// count is restated rather than silently stretched.
+    private func isFirstOccurrence(_ event: EKEvent) -> Bool {
+        guard let id = event.eventIdentifier,
+              let first = store.event(withIdentifier: id)?.occurrenceDate,
+              let this = event.occurrenceDate
+        else { return false }
+        return abs(first.timeIntervalSince(this)) < 1
     }
 
     // MARK: - Shared helpers
@@ -622,7 +882,13 @@ public actor CalendarService {
             }
             return event
         }
-        guard let span, span != .allEvents else { return event }
+        // A read with an occurrence_date gets that occurrence, so its details show
+        // its own time and anyone's replies to it; without one, any will do.
+        guard let span else {
+            guard let occurrence = try args.optionalDate("occurrence_date") else { return event }
+            return try findOccurrence(of: event, identifier: identifier, at: occurrence.date)
+        }
+        guard span != .allEvents else { return event }
 
         guard let occurrence = try args.optionalDate("occurrence_date") else {
             throw MacBridgeError.invalidArgument(

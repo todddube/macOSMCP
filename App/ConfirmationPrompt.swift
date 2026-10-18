@@ -63,7 +63,7 @@ enum ConfirmationPrompt {
 
         // Don't Allow is the default button: an alert that appears while someone is
         // typing elsewhere must not delete anything on a stray Return.
-        let delete = alert.addButton(withTitle: "Delete")
+        let delete = alert.addButton(withTitle: tool == "calendar_update_event" ? "Change Repeat" : "Delete")
         delete.hasDestructiveAction = true
         delete.keyEquivalent = ""
         let decline = alert.addButton(withTitle: "Don't Allow")
@@ -96,6 +96,7 @@ enum ConfirmationPrompt {
         case "calendar_cancel_event": return "delete a calendar event"
         case "reminders_delete_reminder": return "delete a reminder"
         case "reminders_delete_list": return "delete a reminder list"
+        case "calendar_update_event": return "change how an event repeats"
         default: return "run \(tool)"
         }
     }

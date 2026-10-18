@@ -132,7 +132,7 @@ final class AppModel: ObservableObject {
 
     /// Apply ``policy`` to one call: nil to run it, or the refusal the model sees.
     private func authorize(tool: String, arguments: [String: Value]?, client: ClientIdentity) async -> String? {
-        switch policy.decision(for: tool) {
+        switch policy.decision(for: tool, arguments: arguments) {
         case .allow:
             return nil
         case .refuse(let message):
@@ -140,7 +140,8 @@ final class AppModel: ObservableObject {
             return message
         case .confirm:
             let deadline = Date().addingTimeInterval(ConfirmationPrompt.budget)
-            let target = await registry.confirmationTarget(tool, arguments: arguments)
+            let (needed, target) = await registry.confirmation(tool, arguments: arguments)
+            guard needed else { return nil }
             switch await confirm(client: client.name, tool: tool, target: target, deadline: deadline) {
             case .approved:
                 BridgeLog.info("\(tool) approved by the user", category: .tools)

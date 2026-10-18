@@ -118,6 +118,31 @@ public actor ToolRegistry {
         return try await handler(Arguments(arguments))
     }
 
+    /// True when a call may remove data, so Ask before deleting holds it for the
+    /// user: the destructive tools, and an event update that changes the repeat,
+    /// which drops the occurrences that no longer fit.
+    ///
+    /// Decided from the name and argument names alone. Whether the event really
+    /// repeats is checked afterwards by ``confirmation(_:arguments:)``.
+    public nonisolated static func mayRemoveData(_ toolName: String, arguments: [String: Value]?) -> Bool {
+        if destructiveToolNames.contains(toolName) { return true }
+        guard toolName == "calendar_update_event", let keys = arguments?.keys else { return false }
+        return !Recurrence.argumentNames.isDisjoint(with: keys)
+    }
+
+    /// Whether a call ``mayRemoveData(_:arguments:)`` flagged really needs asking
+    /// about, and what it would remove, in words for the prompt.
+    ///
+    /// Only a repeat change can turn out not to: making a one-off event repeat
+    /// loses nothing, and a change the call would refuse isn't worth asking about.
+    /// A destructive tool whose target can't be looked up still asks.
+    public func confirmation(_ name: String, arguments: [String: Value]?) async -> (needed: Bool, target: String?) {
+        if name == "calendar_update_event" {
+            return await calendar.repeatChangeTarget(Arguments(arguments))
+        }
+        return (true, await confirmationTarget(name, arguments: arguments))
+    }
+
     /// What a destructive call would remove, in words for a confirmation prompt —
     /// "the event “Standup” on 19 Oct 2026 at 10:00 (this occurrence only)" — or nil
     /// when it can't be looked up, in which case the prompt says less but still asks.

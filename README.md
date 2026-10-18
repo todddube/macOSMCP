@@ -42,7 +42,15 @@ to guess. Times are in the Mac's local time zone.
 
 `calendar_find_available_times` exists so a model proposing a meeting slot does not have to read
 events and reason about the gaps itself. Events marked *free* and cancelled events do not block;
-all-day events block their whole span.
+all-day events block their whole span. Birthdays, and all-day events on subscribed calendars such
+as public holidays, don't block unless `include_subscribed` is set or `calendars` names them; timed
+events on subscribed calendars still do. The result says what was left out.
+
+Search results stay short: each event says how it repeats and, for an invitation, how you
+replied. Pass `event_id` to `calendar_search_events` for one event in full: who is invited and
+how each replied, its alerts, and whether it shows as busy. Pass `include_details` to get that
+for every event. `calendar_update_event` changes alerts, availability and how an event repeats;
+`reminders_update_reminder` changes how a reminder repeats.
 
 ## Install
 
@@ -146,7 +154,8 @@ who would rather make the change themselves.
 
 **Safety** controls what every connected client may do. **Read-only** refuses all changes, and
 **Ask before deleting** (on by default) shows an alert before any event, reminder or list is
-deleted; nobody answering within a minute counts as Don't Allow.
+deleted, and before a repeating event's repeat is changed, which removes the occurrences that no
+longer fit. Nobody answering within a minute counts as Don't Allow.
 
 ## Logs and diagnostics
 
@@ -438,6 +447,11 @@ Xcode over a beta.
 - **First notarized release.** `make release` and `make publish` are ready, but haven't run yet: they
   need the Developer ID certificate and notary credentials set up.
 - **Automatic updates.** New versions are downloaded from GitHub by hand for now.
+- **Connect for Cursor, Windsurf and VS Code.** One-click setup covers Claude Code and Claude
+  Desktop; other clients take the command from **Manual setup**
+  ([#2](https://github.com/todddube/macOSMCP/issues/2)).
+- **Inviting people.** Attendees can be read but not added: EventKit has no way to send
+  invitations.
 
 ## Feedback
 
@@ -559,6 +573,16 @@ app doesn't answer within two minutes reports that plainly rather than as `errno
 talking to an older running copy of the app says so in the client's log. The app refuses bridge
 connections from other users and keeps its socket folder private on every start. A failed call in
 **Recent Activity** shows why, with the whole message on hover.
+
+Events in more detail. Search results say how an event repeats and how you replied to an
+invitation; `event_id` returns one event in full, with attendees and their replies, alerts and
+availability. Event updates can change alerts, availability (busy, free, tentative or away) and
+how the event repeats, from one occurrence on or for the whole series; reminder updates can
+change how a reminder repeats. A repeat change that would remove occurrences asks first, like a
+delete, and changing a repeat keeps its days (a Monday, Wednesday and Friday meeting stays one). A requested alert no longer comes with Calendar's default alert as well, a repeat that
+ends on a date now includes that date, and a repeating reminder without a due date is refused
+with the reason rather than failing to save. Free-time search ignores birthdays and all-day events on
+subscribed calendars, so a public holiday no longer blocks the whole day.
 
 
 **0.7.0** — About window, right-click menu, client status dots, and traffic in the menu bar.

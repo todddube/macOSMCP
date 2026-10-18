@@ -39,12 +39,15 @@ struct DirectBackend: ToolBackend {
     /// There is nowhere to show a confirmation here, so a call that needs one is
     /// refused with a message saying how to proceed.
     func callTool(_ name: String, arguments: [String: Value]?) async throws -> Value {
-        switch AccessPolicy.load().decision(for: name) {
+        switch AccessPolicy.load().decision(for: name, arguments: arguments) {
         case .allow:
             return try await registry.call(name, arguments: arguments)
         case .refuse(let message):
             throw BridgeClient.ClientError.refused(message)
         case .confirm:
+            guard await registry.confirmation(name, arguments: arguments).needed else {
+                return try await registry.call(name, arguments: arguments)
+            }
             throw BridgeClient.ClientError.refused(AccessPolicy.cannotConfirm(name))
         }
     }

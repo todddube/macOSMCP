@@ -230,7 +230,10 @@ public actor RemindersService {
         if let notes = args.optionalString("notes") { reminder.notes = notes }
         if let url = try args.optionalURL("url") { reminder.url = url }
         if let priority = try ReminderMapping.parsePriority(args) { reminder.priority = priority }
-        if let rule = try Recurrence.rule(from: args) { reminder.addRecurrenceRule(rule) }
+        if let rule = try Recurrence.rule(from: args) {
+            try requireDueForRepeat(reminder)
+            reminder.addRecurrenceRule(rule)
+        }
 
         try save(reminder)
 
@@ -287,6 +290,20 @@ public actor RemindersService {
             )
             try CalendarResolution.requireWritable(cal, kind: "reminder list")
             reminder.calendar = cal
+        }
+
+        // Unlike an event's, a reminder's repeat removes nothing: the next one is
+        // only made when this one is completed.
+        switch try Recurrence.change(from: args, existing: reminder.recurrenceRules?.first) {
+        case .remove:
+            for rule in reminder.recurrenceRules ?? [] { reminder.removeRecurrenceRule(rule) }
+        case .set(let rule):
+            try requireDueForRepeat(reminder)
+            reminder.recurrenceRules = [rule]
+        case nil:
+            // Only when this call removed the due date; an unrelated edit to one
+            // already in that state isn't refused.
+            if args.contains("due"), reminder.hasRecurrenceRules { try requireDueForRepeat(reminder) }
         }
 
         try save(reminder)
@@ -526,6 +543,17 @@ public actor RemindersService {
                 reminder.removeAlarm(alarm)
             }
         }
+    }
+
+    /// Refuse a repeat on a reminder with no due date.
+    ///
+    /// A repeat counts from the due date, so Reminders won't keep one without it.
+    private func requireDueForRepeat(_ reminder: EKReminder) throws {
+        guard reminder.dueDateComponents == nil else { return }
+        throw MacBridgeError.invalidArgument(
+            name: "due",
+            reason: "a repeating reminder needs a due date; pass due, or recurrence 'none' to stop it repeating"
+        )
     }
 
     /// `isCompleted` and `completionDate` must move together; setting only the

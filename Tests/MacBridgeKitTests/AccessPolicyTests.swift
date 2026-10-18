@@ -19,10 +19,10 @@ struct AccessPolicyTests {
     @Test("By default everything runs, and deleting is confirmed")
     func defaults() {
         let policy = AccessPolicy()
-        #expect(policy.decision(for: "calendar_create_event") == .allow)
-        #expect(policy.decision(for: "reminders_search_reminders") == .allow)
+        #expect(policy.decision(for: "calendar_create_event", arguments: nil) == .allow)
+        #expect(policy.decision(for: "reminders_search_reminders", arguments: nil) == .allow)
         for tool in ToolRegistry.destructiveToolNames {
-            #expect(policy.decision(for: tool) == .confirm, "\(tool) should be confirmed")
+            #expect(policy.decision(for: tool, arguments: nil) == .confirm, "\(tool) should be confirmed")
         }
     }
 
@@ -30,7 +30,7 @@ struct AccessPolicyTests {
     func readOnly() {
         let policy = AccessPolicy(readOnly: true)
         for tool in ToolRegistry.definitions() {
-            let decision = policy.decision(for: tool.name)
+            let decision = policy.decision(for: tool.name, arguments: nil)
             if tool.annotations.readOnlyHint == true || tool.name.contains("_open_") {
                 #expect(decision == .allow, "\(tool.name) only reads and should still run")
             } else {
@@ -44,10 +44,22 @@ struct AccessPolicyTests {
         }
     }
 
+    @Test("Changing an event's repeat is held for confirmation; other edits aren't")
+    func repeatChange() {
+        let policy = AccessPolicy()
+        #expect(policy.decision(for: "calendar_update_event", arguments: ["title": .string("x")]) == .allow)
+        #expect(policy.decision(for: "calendar_update_event", arguments: ["recurrence": .string("none")]) == .confirm)
+        #expect(policy.decision(for: "calendar_update_event", arguments: ["recurrence_count": .int(3)]) == .confirm)
+        // A reminder's repeat removes nothing.
+        #expect(policy.decision(for: "reminders_update_reminder", arguments: ["recurrence": .string("none")]) == .allow)
+        #expect(AccessPolicy(confirmDestructive: false)
+            .decision(for: "calendar_update_event", arguments: ["recurrence": .string("none")]) == .allow)
+    }
+
     @Test("Turning off confirmation lets deletes through")
     func noConfirmation() {
         let policy = AccessPolicy(confirmDestructive: false)
-        #expect(policy.decision(for: "reminders_delete_list") == .allow)
+        #expect(policy.decision(for: "reminders_delete_list", arguments: nil) == .allow)
     }
 
     @Test("The policy round-trips through defaults, and a missing key keeps confirmation on")

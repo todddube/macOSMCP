@@ -72,7 +72,7 @@ enum RemindersTools {
                         "priority": Schema.string("Priority level.", options: ["high", "medium", "low", "none"]),
                         "url": Schema.string("A URL to attach."),
                         "alarm": Schema.boolean("Add an alert at the due time. Only applies when due includes a time.", default: true),
-                        "recurrence": Schema.string("Repeat frequency.", options: ["daily", "weekly", "monthly", "yearly", "none"]),
+                        "recurrence": Schema.string("Repeat frequency. Needs a due date.", options: ["daily", "weekly", "monthly", "yearly", "none"]),
                         "recurrence_interval": Schema.integer("Repeat every N periods.", default: 1, minimum: 1),
                         "recurrence_count": Schema.integer("Stop after this many occurrences.", minimum: 1),
                         "recurrence_until": Schema.string("Stop repeating after this date. \(Schema.dateFormats)"),
@@ -87,7 +87,7 @@ enum RemindersTools {
                 description: """
                     Change fields on an existing reminder. Omitted fields are left alone; passing an \
                     empty string or null for due, notes or url clears it. \
-                    Also moves a reminder between lists when list is given.
+                    Also moves a reminder between lists when list is given, and changes how it repeats.
                     """,
                 inputSchema: Schema.object(
                     properties: [
@@ -100,6 +100,13 @@ enum RemindersTools {
                         "list": Schema.string("Move the reminder to this list, by name or id."),
                         "completed": Schema.boolean("Mark complete or incomplete."),
                         "alarm": Schema.boolean("When due moves to a time, add an alert at the new time.", default: true),
+                        "recurrence": Schema.string(
+                            "Make the reminder repeat, change how often, or stop it with none. Needs a due date.",
+                            options: ["daily", "weekly", "monthly", "yearly", "none"]
+                        ),
+                        "recurrence_interval": Schema.integer("Repeat every N periods; the rest of the repeat is kept.", minimum: 1),
+                        "recurrence_count": Schema.integer("End the repeat after this many occurrences; null repeats forever.", minimum: 1),
+                        "recurrence_until": Schema.string("End the repeat on this date; null repeats forever. \(Schema.dateFormats)"),
                     ],
                     required: ["reminder_id"]
                 ),
