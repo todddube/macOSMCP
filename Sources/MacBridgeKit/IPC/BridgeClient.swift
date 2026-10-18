@@ -43,6 +43,8 @@ public actor BridgeClient {
         /// The connection dropped after a write tool's request was sent, so it may
         /// or may not have run. Never retried: running it again could duplicate it.
         case outcomeUnknown(tool: String)
+        /// The app took longer than the read timeout to answer.
+        case noReply(tool: String, seconds: Int, changesData: Bool)
 
         public var errorDescription: String? {
             switch self {
@@ -56,6 +58,11 @@ public actor BridgeClient {
                     Two copies of MacBridge are running — quit the one at \(actual) from its \
                     menu-bar icon, then retry.
                     """
+            case .noReply(let tool, let seconds, let changesData):
+                let advice = changesData
+                    ? "It may still complete, so check with calendar_search_events or reminders_search_reminders before calling it again."
+                    : "Try again; if it keeps happening, the user can use Restart Bridge in the MacBridge menu."
+                return "MacBridge didn't answer \(tool) within \(seconds) seconds. \(advice)"
             case .outcomeUnknown(let tool):
                 return """
                     The connection to MacBridge dropped after \(tool) was sent, so it may or may not \
@@ -67,6 +74,9 @@ public actor BridgeClient {
     }
 
     private init() {}
+
+    /// How long a request waits for the app's reply.
+    static let replyTimeout: TimeInterval = 120
 
     // MARK: Connecting
 
@@ -139,8 +149,10 @@ public actor BridgeClient {
         }
 
         // A hung app would otherwise hang the AI client indefinitely. Generous,
-        // because an EventKit query across many calendars is legitimately slow.
-        var timeout = timeval(tv_sec: 120, tv_usec: 0)
+        // because an EventKit query across many calendars is legitimately slow, and
+        // longer than the app's 90-second budget for a delete confirmation
+        // (queueing included), so a refusal from that still arrives.
+        var timeout = timeval(tv_sec: Int(Self.replyTimeout), tv_usec: 0)
         setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
         fd = socket
@@ -239,6 +251,8 @@ public actor BridgeClient {
         var sent = false
         do {
             return try sendAndReceive(request, sent: &sent)
+        } catch let error as SocketEndpoint.SocketError where Self.isTimeout(error) {
+            throw abandon(request)
         } catch {
             guard shouldRetry(after: error), let reconnect else { throw error }
 
@@ -257,10 +271,36 @@ public actor BridgeClient {
             // 750ms try surfaced "The connection was closed." to the model instead of
             // recovering.
             guard try await reestablish(to: reconnect.socketURL) else { throw error }
-            try handshake(clientName: reconnect.clientName, clientVersion: reconnect.clientVersion)
-            var resent = false
-            return try sendAndReceive(request, sent: &resent)
+            do {
+                try handshake(clientName: reconnect.clientName, clientVersion: reconnect.clientVersion)
+                var resent = false
+                return try sendAndReceive(request, sent: &resent)
+            } catch let retryError as SocketEndpoint.SocketError where Self.isTimeout(retryError) {
+                throw abandon(request)
+            }
         }
+    }
+
+    /// Give up on a request the app didn't answer in time.
+    ///
+    /// The app may still be working on it and would answer into this connection
+    /// later; dropping the connection means the next request starts clean instead
+    /// of queueing behind the stale reply.
+    private func abandon(_ request: BridgeRequest) -> ClientError {
+        disconnect()
+        framer = LineFramer()
+        queued.removeAll()
+        return ClientError.noReply(
+            tool: request.name ?? request.op.rawValue,
+            seconds: Int(Self.replyTimeout),
+            changesData: request.name.map(ToolRegistry.changesData) ?? false
+        )
+    }
+
+    /// A receive timeout: `SO_RCVTIMEO` makes `read` fail with `EAGAIN`.
+    static func isTimeout(_ error: SocketEndpoint.SocketError) -> Bool {
+        if case .syscall("read", let code) = error { return code == EAGAIN || code == EWOULDBLOCK }
+        return false
     }
 
     /// Whether sending `request` a second time can't change anything: the tool
@@ -295,7 +335,7 @@ public actor BridgeClient {
         if let error = error as? ClientError {
             switch error {
             case .protocolFailure: return true
-            case .refused, .wrongBundle, .appUnavailable, .toolFailed, .outcomeUnknown: return false
+            case .refused, .wrongBundle, .appUnavailable, .toolFailed, .outcomeUnknown, .noReply: return false
             }
         }
         if let error = error as? SocketEndpoint.SocketError {

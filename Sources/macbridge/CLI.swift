@@ -234,29 +234,21 @@ func runMCPServer(backend: ToolBackend) async throws {
 }
 
 /// The in-process backend for `--direct`, otherwise a connection to MacBridge.app,
-/// launching it if needed. Throws when the app can't be reached.
+/// made lazily (launching the app if needed) so the MCP server starts at once.
+/// Throws only when the socket path can't be worked out.
 func makeBackend(arguments: [String]) async throws -> ToolBackend {
     if arguments.contains("--direct") {
         return DirectBackend(registry: ToolRegistry())
     }
 
-    let clientName = ClientDetection.detect(arguments: arguments)
-    let socketURL = try BridgeProtocol.socketURL()
-
-    do {
-        let client = try await BridgeClient.connect(
-            clientName: clientName,
-            clientVersion: nil,
-            socketURL: socketURL
-        )
-        let toolCount = await client.welcome?.toolCount ?? 0
-        log("connected to MacBridge.app as '\(clientName)' — \(toolCount) tools")
-        return BridgeBackend(client: client)
-    } catch {
-        let detail = (error as? BridgeClient.ClientError)?.errorDescription ?? error.localizedDescription
-        log("could not reach MacBridge.app: \(detail)", isError: true)
-        throw error
-    }
+    let bridge = LazyBridge(
+        clientName: ClientDetection.detect(arguments: arguments),
+        socketURL: try BridgeProtocol.socketURL()
+    )
+    // Warm up in the background so the first tool call doesn't pay for launching
+    // the app; a failure here is logged and retried by that call.
+    Task { _ = try? await bridge.client() }
+    return BridgeBackend(bridge: bridge)
 }
 
 // MARK: - Entry point

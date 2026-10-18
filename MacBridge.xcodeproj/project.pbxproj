@@ -31,6 +31,7 @@
 		CCF586578BE8DF61517CFAD6 /* FreeBusyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E758FDE3EB14801BC4D7E557 /* FreeBusyTests.swift */; };
 		CDF83BD4B98EA0430D1B7AA7 /* MacBridgeKit in Frameworks */ = {isa = PBXBuildFile; productRef = 46B2EDF87F266BE596721B27 /* MacBridgeKit */; };
 		D518EB1341FF6098A7F79BD3 /* DateParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA34387776788B690BCA193 /* DateParsingTests.swift */; };
+		D7C4A0E708D5BBE54913B3E1 /* ConfirmationPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98CA35876BEE24DF87AD5C5B /* ConfirmationPrompt.swift */; };
 		D8E5FBB5B9E9C1DF3527D91C /* BridgeIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE021AF26DC12CB161DCF01E /* BridgeIdentityTests.swift */; };
 		F0B7270B563718A8BAC828B1 /* CLI.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D12608BF14E215CC7F7798 /* CLI.swift */; };
 		F31F903FB80FF98096FF5AB8 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90EEE13E77D450A622C439F2 /* StatusItemController.swift */; };
@@ -53,6 +54,7 @@
 		90EEE13E77D450A622C439F2 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		90FE346036BC1626BACB813F /* MenuContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContent.swift; sourceTree = "<group>"; };
 		942C5263D7278DFE72490E39 /* LaunchAtLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLogin.swift; sourceTree = "<group>"; };
+		98CA35876BEE24DF87AD5C5B /* ConfirmationPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationPrompt.swift; sourceTree = "<group>"; };
 		9D38C6B831BBBE75566E61EC /* InstallLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallLocation.swift; sourceTree = "<group>"; };
 		9DA34387776788B690BCA193 /* DateParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParsingTests.swift; sourceTree = "<group>"; };
 		9DFC4C03F783DEF3EAF48911 /* MacBridgeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacBridgeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -123,6 +125,7 @@
 				AD4E53990546A9077D95BDA7 /* AppModel.swift */,
 				2FA83CD15573E2DDC7E9649E /* Assets.xcassets */,
 				B97ADADD5EDC39DA13E14978 /* BridgeTraffic.swift */,
+				98CA35876BEE24DF87AD5C5B /* ConfirmationPrompt.swift */,
 				9D38C6B831BBBE75566E61EC /* InstallLocation.swift */,
 				942C5263D7278DFE72490E39 /* LaunchAtLogin.swift */,
 				E79A56723642F92C03C71381 /* MacBridgeApp.swift */,
@@ -320,6 +323,7 @@
 				667C0CB8781647A636806DA1 /* Backend.swift in Sources */,
 				3FEAB9F716AEE0D37F8AB85F /* BridgeTraffic.swift in Sources */,
 				F0B7270B563718A8BAC828B1 /* CLI.swift in Sources */,
+				D7C4A0E708D5BBE54913B3E1 /* ConfirmationPrompt.swift in Sources */,
 				7389540F0A9F1831117060C8 /* InstallLocation.swift in Sources */,
 				3E0718FBCC0E5713BD934322 /* LaunchAtLogin.swift in Sources */,
 				250B5E9B481DB4C6E8197A19 /* MacBridgeApp.swift in Sources */,

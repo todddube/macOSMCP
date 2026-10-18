@@ -183,7 +183,58 @@ public enum ClientConfigWriter {
             return fileManager.fileExists(atPath: backup.path) ? backup : nil
         }
 
+        try replace(url, existing: existing, with: updated)
+        return backup
+    }
+
+    /// Remove MacBridge from the config at `url`: our entry, and any plain copy of
+    /// it under another name. Entries with flags of their own were set up on purpose
+    /// and are left, as Connect leaves them. The same backups as ``install(shimPath:configAt:)``.
+    ///
+    /// - Returns: The entry names removed; empty when there was nothing to remove,
+    ///   in which case the file is not touched.
+    @discardableResult
+    public static func uninstall(configAt link: URL) throws -> [String] {
+        let url = link.resolvingSymlinksInPath()
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let existing = try Data(contentsOf: url)
+        guard let (updated, removed) = try removed(from: existing, path: url.path) else { return [] }
+        try replace(url, existing: existing, with: updated)
+        return removed
+    }
+
+    /// The config without MacBridge, and the names removed; nil when it has no
+    /// MacBridge entry to remove. Pure, like ``merged(into:shimPath:path:)``.
+    public static func removed(from existing: Data, path: String) throws -> (Data, [String])? {
+        guard var root = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] else {
+            throw WriteError.unreadable(path: path)
+        }
+        guard let current = root["mcpServers"] else { return nil }
+        guard var servers = current as? [String: Any] else {
+            throw WriteError.unexpectedServers(path: path)
+        }
+
+        var names = macbridgeEntryNames(in: servers).filter { $0 == serverKey || isPlainEntry(servers[$0]) }
+        // Ours goes even if it was repointed at something else by hand.
+        if servers[serverKey] != nil, !names.contains(serverKey) { names.insert(serverKey, at: 0) }
+        guard !names.isEmpty else { return nil }
+
+        for name in names { servers.removeValue(forKey: name) }
+        root["mcpServers"] = servers
+        let data = try JSONSerialization.data(
+            withJSONObject: root,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        )
+        return (data, names)
+    }
+
+    /// Write `updated` over an existing config: the original kept once as
+    /// `.macbridge-backup`, the file as it was saved as `.macbridge-previous`, and
+    /// the file's permissions carried over to it and both copies.
+    private static func replace(_ url: URL, existing: Data, with updated: Data) throws {
+        let fileManager = FileManager.default
         let permissions = try fileManager.attributesOfItem(atPath: url.path)[.posixPermissions]
+        let backup = url.appendingPathExtension("macbridge-backup")
         if !fileManager.fileExists(atPath: backup.path) {
             try fileManager.copyItem(at: url, to: backup)
         }
@@ -197,7 +248,6 @@ public enum ClientConfigWriter {
                 try fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: copy.path)
             }
         }
-        return backup
     }
 
     /// Whether two configs hold the same JSON, whatever their formatting.

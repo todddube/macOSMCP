@@ -10,6 +10,7 @@
 import AppKit
 import EventKit
 import Foundation
+import MCP
 import MacBridgeKit
 import SwiftUI
 
@@ -44,12 +45,28 @@ final class AppModel: ObservableObject {
     /// Why the last change to ``launchAtLogin`` failed, shown under the checkbox.
     @Published private(set) var launchAtLoginError: String?
     @Published var log = ActivityLog()
+    /// What clients may do: Read-only, and asking before deleting. Saved on change,
+    /// where `macbridge mcp --direct` reads it too.
+    @Published var policy = AccessPolicy.load() {
+        didSet {
+            guard policy != oldValue else { return }
+            policy.save()
+            BridgeLog.info(
+                "policy: read-only \(policy.readOnly ? "on" : "off"), "
+                    + "ask before deleting \(policy.confirmDestructive ? "on" : "off")",
+                category: .app
+            )
+        }
+    }
     /// The animated traffic in the menu-bar icon and the panel. Not `@Published`:
     /// it ticks at 30fps while busy, and only the views drawing it should redraw.
     let traffic = BridgeTraffic()
 
     private let registry = ToolRegistry()
     private var server: BridgeServer?
+    /// The last confirmation asked for, so the next waits for it: two deletes
+    /// arriving together get two alerts in turn rather than one on top of the other.
+    private var confirmationTail: Task<Void, Never>?
 
     /// One store, used only for permission checks and requests. The services in
     /// MacBridgeKit hold their own.
@@ -88,9 +105,11 @@ final class AppModel: ObservableObject {
             let server = BridgeServer(
                 registry: registry,
                 socketURL: socketURL,
-                // Allows every call for now; this is where the consent store and a
-                // confirmation sheet for destructive tools will attach.
-                authorize: nil,
+                authorize: { [weak self] request, identity in
+                    // Fail closed: a policy check that can't run must not allow.
+                    guard let self, let tool = request.name else { return AccessPolicy.unavailable }
+                    return await self.authorize(tool: tool, arguments: request.arguments, client: identity)
+                },
                 observe: { [weak self] event in
                     // Observer is called from the server's connection queues.
                     Task { @MainActor [weak self] in self?.handle(event) }
@@ -107,6 +126,46 @@ final class AppModel: ObservableObject {
             state = .failed(error.localizedDescription)
             BridgeLog.error("could not start the bridge: \(error.localizedDescription)", category: .app)
         }
+    }
+
+    // MARK: Access policy
+
+    /// Apply ``policy`` to one call: nil to run it, or the refusal the model sees.
+    private func authorize(tool: String, arguments: [String: Value]?, client: ClientIdentity) async -> String? {
+        switch policy.decision(for: tool) {
+        case .allow:
+            return nil
+        case .refuse(let message):
+            BridgeLog.info("\(tool) refused — read-only mode", category: .tools)
+            return message
+        case .confirm:
+            let deadline = Date().addingTimeInterval(ConfirmationPrompt.budget)
+            let target = await registry.confirmationTarget(tool, arguments: arguments)
+            switch await confirm(client: client.name, tool: tool, target: target, deadline: deadline) {
+            case .approved:
+                BridgeLog.info("\(tool) approved by the user", category: .tools)
+                return nil
+            case .declined:
+                BridgeLog.info("\(tool) declined by the user", category: .tools)
+                return AccessPolicy.declined(tool)
+            case .timedOut:
+                BridgeLog.info("\(tool) confirmation timed out", category: .tools)
+                return AccessPolicy.timedOut(tool)
+            }
+        }
+    }
+
+    /// Show the confirmation once any earlier one has been answered.
+    private func confirm(
+        client: String, tool: String, target: String?, deadline: Date
+    ) async -> ConfirmationPrompt.Outcome {
+        let previous = confirmationTail
+        let prompt = Task { @MainActor () -> ConfirmationPrompt.Outcome in
+            await previous?.value
+            return ConfirmationPrompt.ask(client: client, tool: tool, target: target, deadline: deadline)
+        }
+        confirmationTail = Task { _ = await prompt.value }
+        return await prompt.value
     }
 
     /// Stop serving and remove the socket. Connected shims reconnect when it returns.
@@ -525,6 +584,67 @@ final class AppModel: ObservableObject {
         default:
             break
         }
+    }
+
+    /// Take MacBridge out of a client's configuration: the reverse of ``connect(_:)``.
+    /// Entries the user set up with flags of their own are left, as Connect leaves
+    /// them; the config is backed up the same way.
+    func disconnect(_ client: ClientSetup) {
+        switch client.id {
+        case "claude-desktop":
+            do {
+                let removed = try ClientConfigWriter.uninstall(configAt: URL(fileURLWithPath: client.configPath))
+                BridgeLog.info("removed MacBridge from Claude Desktop's config (\(removed.count) entries)", category: .app)
+                setupResult = SetupResult(
+                    clientID: client.id,
+                    message: removed.isEmpty
+                        ? "MacBridge wasn't in Claude Desktop's config."
+                        : "Removed. Quit and reopen Claude Desktop to finish.",
+                    isError: false
+                )
+            } catch {
+                BridgeLog.error("couldn't update Claude Desktop's config: \(error)", category: .app)
+                setupResult = SetupResult(clientID: client.id, message: error.localizedDescription, isError: true)
+            }
+            refreshClientSetup()
+
+        case "claude-code":
+            guard let cli = claudeCLIPath else {
+                setupResult = SetupResult(
+                    clientID: client.id,
+                    message: "The claude command wasn't found. Run `claude mcp remove --scope user macbridge` yourself.",
+                    isError: true
+                )
+                return
+            }
+            connectingClientID = client.id
+            let config = URL(fileURLWithPath: client.configPath)
+            Task {
+                let result = await Self.removeFromClaudeCode(cli: cli, config: config)
+                connectingClientID = nil
+                setupResult = SetupResult(clientID: client.id, message: result.message, isError: !result.ok)
+                refreshClientSetup()
+            }
+
+        default:
+            break
+        }
+    }
+
+    /// `claude mcp remove --scope user` for our entry and any plain stale copy,
+    /// off the main thread for the same reason as ``addToClaudeCode(cli:shimPath:config:)``.
+    private nonisolated static func removeFromClaudeCode(cli: String, config: URL) async -> (ok: Bool, message: String) {
+        await Task.detached {
+            let names = ClientConfigWriter.reAddPlan(forConfigAt: config).remove
+            guard !names.isEmpty else { return (true, "MacBridge wasn't set up in Claude Code.") }
+            let failed = names.filter { run(cli, ["mcp", "remove", "--scope", "user", $0]).status != 0 }
+            if failed.isEmpty {
+                BridgeLog.info("removed MacBridge from Claude Code (user scope)", category: .app)
+                return (true, "Removed. New Claude Code sessions won't see MacBridge.")
+            }
+            BridgeLog.error("claude mcp remove failed for \(failed.count) entries", category: .app)
+            return (false, "claude mcp remove failed for: \(failed.joined(separator: ", ")).")
+        }.value
     }
 
     /// Run `claude mcp add --scope user` off the main thread, first removing our

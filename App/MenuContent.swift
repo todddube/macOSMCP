@@ -29,6 +29,8 @@ struct MenuContent: View {
             Divider()
             permissions
             Divider()
+            safety
+            Divider()
             setup
             Divider()
             clients
@@ -167,6 +169,35 @@ struct MenuContent: View {
         }
     }
 
+    // MARK: Safety
+
+    /// What connected clients may do. Read-only covers every write; asking before
+    /// deleting covers the three tools that can't be undone.
+    private var safety: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("SAFETY")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Toggle("Read-only", isOn: $model.policy.readOnly)
+                .toggleStyle(.checkbox)
+            Text(model.policy.readOnly
+                 ? "Clients can read your calendars and reminders but not change them."
+                 : "Clients can add, change and complete items.")
+                .font(.caption2)
+                .foregroundStyle(model.policy.readOnly ? .orange : .secondary)
+                .padding(.leading, 20)
+
+            Toggle("Ask before deleting", isOn: $model.policy.confirmDestructive)
+                .toggleStyle(.checkbox)
+                .disabled(model.policy.readOnly)
+            Text("Deleting an event, reminder or list waits for you to allow it.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 20)
+        }
+    }
+
     // MARK: Setup
 
     /// What the user has to do for any of this to be useful.
@@ -214,13 +245,24 @@ struct MenuContent: View {
 
             switch client.status {
             case .ready:
-                // Keep the "restart Claude Desktop" reminder visible after Connect,
-                // since the row flips to ready the moment the config is written.
-                if let result = model.setupResult, result.clientID == client.id, !result.isError {
-                    Text(result.message)
+                HStack(spacing: 6) {
+                    // Keep the "restart Claude Desktop" reminder visible after Connect,
+                    // since the row flips to ready the moment the config is written.
+                    if let result = model.setupResult, result.clientID == client.id, !result.isError {
+                        Text(result.message)
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    if model.connectingClientID == client.id {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Button("Disconnect") { model.disconnect(client) }
+                        .buttonStyle(.link)
                         .font(.caption2)
-                        .foregroundStyle(.green)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .disabled(model.connectingClientID == client.id)
+                        .help("Remove MacBridge from \(client.name)'s settings. Connect adds it back.")
                 }
 
             case .notInstalled:
@@ -384,13 +426,22 @@ struct MenuContent: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if let summary = entry.summary {
+                        if !entry.ok, let detail = entry.detail {
+                            // Why it failed, which the row used to keep to itself;
+                            // the whole message is a hover away.
+                            Text(detail)
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        } else if let summary = entry.summary {
                             Text(summary)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                     }
+                    .help(entry.ok ? "" : entry.detail ?? "")
                 }
 
                 if log.totalCalls > rows.count {

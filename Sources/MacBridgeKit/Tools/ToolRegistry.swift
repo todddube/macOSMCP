@@ -60,8 +60,7 @@ public actor ToolRegistry {
         definitions().map(\.name)
     }
 
-    /// Tools that destroy data: the set the planned confirmation step will gate.
-    /// Nothing enforces confirmation yet; clients are asked to confirm instead.
+    /// Tools that destroy data: the set ``AccessPolicy`` holds for confirmation.
     ///
     /// Read from the definitions' own `destructiveHint` rather than a second
     /// hand-maintained list, so a new destructive tool lands in the set
@@ -74,6 +73,14 @@ public actor ToolRegistry {
     /// a delete previously looked identical to a search.
     public nonisolated static func isReadOnly(_ toolName: String) -> Bool {
         definitions().first { $0.name == toolName }?.annotations.readOnlyHint == true
+    }
+
+    /// True when a tool can change the user's data: everything that isn't read-only,
+    /// except the `*_open_*` tools, which only reveal an item in Calendar or
+    /// Reminders. What Read-only mode refuses.
+    public nonisolated static func changesData(_ toolName: String) -> Bool {
+        guard let tool = definitions().first(where: { $0.name == toolName }) else { return false }
+        return tool.annotations.readOnlyHint != true && !toolName.contains("_open_")
     }
 
     /// The domain a tool belongs to, from its name prefix; nil for an unknown name.
@@ -109,6 +116,19 @@ public actor ToolRegistry {
         }
         try Self.checkArgumentNames(tool: name, arguments: arguments)
         return try await handler(Arguments(arguments))
+    }
+
+    /// What a destructive call would remove, in words for a confirmation prompt —
+    /// "the event “Standup” on 19 Oct 2026 at 10:00 (this occurrence only)" — or nil
+    /// when it can't be looked up, in which case the prompt says less but still asks.
+    /// Only reads.
+    public func confirmationTarget(_ name: String, arguments: [String: Value]?) async -> String? {
+        let args = Arguments(arguments)
+        switch name {
+        case "calendar_cancel_event": return await calendar.confirmationTarget(args)
+        case "reminders_delete_reminder", "reminders_delete_list": return await reminders.confirmationTarget(name, args)
+        default: return nil
+        }
     }
 
     // MARK: Argument names

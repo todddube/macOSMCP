@@ -60,9 +60,8 @@ You don't need to build anything. Requires **macOS 13 or later**.
 That's it. Ask Claude something like *"what's on my calendar tomorrow?"* to try it. The dots under
 the menu-bar icon turn green when a client is connected.
 
-To remove MacBridge, quit it from the right-click menu, drag it from Applications to the Trash, and
-remove the `macbridge` entry from your Claude settings (`claude mcp remove --scope user macbridge`
-for Claude Code).
+To remove MacBridge, click **Disconnect** next to each client in the panel, quit MacBridge from the
+right-click menu, and drag it from Applications to the Trash.
 
 ### Build from source
 
@@ -106,6 +105,10 @@ panel states where you are:
     ✓ Calendars   granted
     ! Reminders   not yet requested          [Grant…]
 
+  SAFETY
+    ☐ Read-only
+    ☑ Ask before deleting
+
   CLIENT SETUP                               Re-check
     ✓ Claude Code       connected to this app
     ○ Claude Desktop    not set up
@@ -140,6 +143,10 @@ was just before each later change as `claude_desktop_config.json.macbridge-previ
 already correct isn't touched. For Claude Code it runs
 `claude mcp add --scope user`. **Manual setup** still copies the command or the JSON, for anyone
 who would rather make the change themselves.
+
+**Safety** controls what every connected client may do. **Read-only** refuses all changes, and
+**Ask before deleting** (on by default) shows an alert before any event, reminder or list is
+deleted; nobody answering within a minute counts as Don't Allow.
 
 ## Logs and diagnostics
 
@@ -426,10 +433,8 @@ Xcode over a beta.
 
 ## Not yet done
 
-- **Per-client consent.** `BridgeServer` already takes an `Authorizer` that currently allows
-  everything, and the identity handed to it carries a kernel-verified pid rather than the
-  self-reported name. The remaining work is a persisted store, the allow/deny UI on each client
-  row, and a confirmation sheet for the three destructive tools.
+- **Per-client consent.** Read-only and Ask before deleting apply to every client alike. Allowing or
+  blocking one client, or limiting clients to some calendars and lists, isn't built yet.
 - **First notarized release.** `make release` and `make publish` are ready, but haven't run yet: they
   need the Developer ID certificate and notary credentials set up.
 - **Automatic updates.** New versions are downloaded from GitHub by hand for now.
@@ -536,6 +541,24 @@ that finds the thing that's missing, a URL that isn't one is refused instead of 
 an event between all-day and timed no longer leaves odd times, and the default search window is
 seven days, not eight. `macbridge --version` prints the version; an unknown `--flag` is an error
 rather than a second copy of the app.
+
+A **Safety** section in the panel. **Read-only** lets clients read your calendars and reminders but
+refuses every change, telling the model why. **Ask before deleting**, on by default, holds a delete
+or cancel until you allow it, in an alert that names the client and exactly what would go — the
+event and which occurrences, the reminder, or the list and how many reminders are on it. Don't
+Allow is the default button, and the alert declines by itself after a minute so a client is never
+left waiting. `macbridge mcp --direct` follows Read-only too and, with no app to ask, refuses
+deletes while Ask before deleting is on.
+
+**Disconnect** next to a connected client removes MacBridge from its settings, the reverse of
+Connect. `macbridge mcp` now answers the client at once and connects to the app in the background,
+so a cold start (launching MacBridge first) no longer delays the client's startup, and an app that
+can't be reached is reported on the first tool call instead of the server failing outright.
+**Restart Bridge** now really ends open connections; before, a stuck one survived it. A call the
+app doesn't answer within two minutes reports that plainly rather than as `errno 35`, and a shim
+talking to an older running copy of the app says so in the client's log. The app refuses bridge
+connections from other users and keeps its socket folder private on every start. A failed call in
+**Recent Activity** shows why, with the whole message on hover.
 
 
 **0.7.0** — About window, right-click menu, client status dots, and traffic in the menu bar.

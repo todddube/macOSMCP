@@ -220,5 +220,38 @@ struct ClientConfigWriterTests {
         #expect(plan.remove == ["macbridge", "stale"])
         #expect(plan.flags == ["--client", "Work"])
     }
+
+    @Test("Disconnect removes MacBridge and plain copies, keeping everything else")
+    func uninstall() throws {
+        let fileManager = FileManager.default
+        let dir = fileManager.temporaryDirectory
+            .appendingPathComponent("ClientConfigWriterTests-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: dir) }
+
+        let config = dir.appendingPathComponent("claude_desktop_config.json")
+        try Data("""
+            {"theme": "dark", "mcpServers": {
+                "macbridge": {"command": "\(shim)", "args": ["mcp"]},
+                "stale": {"command": "/old/MacBridge.app/Contents/MacOS/macbridge"},
+                "macbridge-dev": {"command": "/dev/macbridge", "args": ["mcp", "--direct"]},
+                "other": {"command": "/usr/bin/other"}}}
+            """.utf8).write(to: config)
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
+
+        let removed = try ClientConfigWriter.uninstall(configAt: config)
+        #expect(removed.sorted() == ["macbridge", "stale"])
+
+        let root = try object(Data(contentsOf: config))
+        #expect(root["theme"] as? String == "dark")
+        let servers = try #require(root["mcpServers"] as? [String: Any])
+        #expect(Set(servers.keys) == ["macbridge-dev", "other"])
+        #expect(try fileManager.attributesOfItem(atPath: config.path)[.posixPermissions] as? Int == 0o600)
+
+        // Nothing left to remove: the file is not touched again.
+        let before = try Data(contentsOf: config)
+        #expect(try ClientConfigWriter.uninstall(configAt: config).isEmpty)
+        #expect(try Data(contentsOf: config) == before)
+    }
 }
 

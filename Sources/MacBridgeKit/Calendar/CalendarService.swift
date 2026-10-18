@@ -422,6 +422,32 @@ public actor CalendarService {
         ])
     }
 
+    /// The event a `calendar_cancel_event` call would remove, in words for the
+    /// confirmation prompt; nil when it can't be found (the call itself will then
+    /// fail with the reason).
+    public func confirmationTarget(_ args: Arguments) async -> String? {
+        guard (try? await ensureAccess()) != nil,
+              let span = try? resolveSpan(args),
+              let event = try? fetchEvent(args, span: span, requireWritable: false)
+        else { return nil }
+
+        var text = "the event \u{201C}\(event.title ?? "(no title)")\u{201D}"
+        if let start = event.startDate {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = event.isAllDay ? .none : .short
+            text += " on \(formatter.string(from: start))"
+        }
+        if Self.repeats(event) {
+            switch span {
+            case .thisEvent: text += " (this occurrence only)"
+            case .futureEvents: text += ", and every later occurrence"
+            case .allEvents: text += ", and every occurrence of the repeating series"
+            }
+        }
+        return text
+    }
+
     // MARK: - calendar_open_event
 
     /// `calendar_open_event`: reveals an event in Calendar.app. Works on read-only calendars.

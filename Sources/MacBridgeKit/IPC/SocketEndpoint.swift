@@ -127,6 +127,14 @@ enum SocketEndpoint {
         return result == 0
     }
 
+    /// The user id on the other end of a connected socket, from the kernel.
+    static func peerUID(_ fd: Int32) -> uid_t? {
+        var uid: uid_t = 0
+        var gid: gid_t = 0
+        guard getpeereid(fd, &uid, &gid) == 0 else { return nil }
+        return uid
+    }
+
     /// The pid on the other end of a connected socket.
     ///
     /// This is the identity that can actually be trusted, unlike the self-reported

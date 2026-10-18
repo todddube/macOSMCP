@@ -342,6 +342,26 @@ public actor RemindersService {
         ])
     }
 
+    /// What a delete would remove, in words for the confirmation prompt; nil when
+    /// it can't be found (the call itself will then fail with the reason).
+    public func confirmationTarget(_ tool: String, _ args: Arguments) async -> String? {
+        guard (try? await ensureAccess()) != nil else { return nil }
+        switch tool {
+        case "reminders_delete_reminder":
+            guard let reminder = try? fetchReminder(args, requireWritable: false) else { return nil }
+            var text = "the reminder \u{201C}\(reminder.title ?? "(no title)")\u{201D}"
+            if let list = reminder.calendar?.title { text += " in \(list)" }
+            return text
+        case "reminders_delete_list":
+            guard let list = try? fetchList(args) else { return nil }
+            let count = await fetch(store.predicateForReminders(in: [list])).count
+            let noun = count == 1 ? "reminder" : "reminders"
+            return "the list \u{201C}\(list.title)\u{201D} and the \(count) \(noun) on it"
+        default:
+            return nil
+        }
+    }
+
     // MARK: - reminders_open_reminder
 
     /// `reminders_open_reminder`: reveals a reminder in Reminders.app. Works on read-only lists.

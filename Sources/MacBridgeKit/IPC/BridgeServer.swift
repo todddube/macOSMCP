@@ -19,9 +19,9 @@ import MCP
 public final class BridgeServer: @unchecked Sendable {
 
     /// Asked to approve each call before it runs, returning a refusal message or
-    /// nil to allow. Currently always allows; this is the seam the planned consent
-    /// store and confirmation sheets plug into, so the server itself never has to
-    /// learn about clients.
+    /// nil to allow. The app applies its ``AccessPolicy`` here (Read-only, and the
+    /// confirmation before deleting), so the server itself never has to learn
+    /// about policy. It may take as long as a person takes to answer.
     public typealias Authorizer = @Sendable (BridgeRequest, ClientIdentity) async -> String?
 
     /// Called on connect, disconnect and each completed call, for the menu bar.
@@ -56,6 +56,10 @@ public final class BridgeServer: @unchecked Sendable {
     private var listenFD: Int32 = -1
     private var running = false
     private var clients: [UUID: ClientIdentity] = [:]
+    /// Every open connection, so ``stop()`` can end them; guarded by `stateLock`.
+    private var connectionFDs: Set<Int32> = []
+    /// Signalled when the accept loop returns, so ``stop()`` can wait for it.
+    private let acceptLoopExited = DispatchSemaphore(value: 0)
 
     /// Configures the server without touching the socket; call ``start()`` to listen.
     /// Omitting `authorize` allows every call.
@@ -101,6 +105,13 @@ public final class BridgeServer: @unchecked Sendable {
         // never runs its own cleanup, and the pre-per-bundle "bridge.sock" has no
         // owner at all now, so nothing else would ever remove them.
         sweepStaleSockets(besides: socketURL)
+
+        // The folder is what keeps other users off the socket: the socket's own
+        // mode is set only after bind. Enforced on every start, because creating
+        // the folder 0700 does nothing for one an older version left more open.
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: socketURL.deletingLastPathComponent().path
+        )
 
         let fd = try SocketEndpoint.makeSocket()
         var addr = try SocketEndpoint.address(for: path)
@@ -148,16 +159,37 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
-    /// Stop accepting, forget connected clients and remove the socket file.
+    /// Stop accepting, end every open connection and remove the socket file.
+    ///
+    /// Closing only the listening socket, as this used to, left two things running:
+    /// each connection's read loop, so a wedged connection survived Restart Bridge;
+    /// and the accept loop, which closing a socket from another thread doesn't
+    /// reliably wake on Darwin, and which could then accept on a reused fd number
+    /// belonging to the next server.
     public func stop() {
         stateLock.lock()
+        let wasRunning = running
         running = false
         let fd = listenFD
         listenFD = -1
         clients.removeAll()
+        // Wake each blocked read with end-of-stream; its loop then closes the fd
+        // and reports the disconnect. The shim reconnects on its next call. Done
+        // under the lock: `serve` removes its fd under it before closing, so none
+        // of these can have been closed and reused for another socket meanwhile.
+        for connection in connectionFDs { shutdown(connection, SHUT_RDWR) }
         stateLock.unlock()
 
+        // Wake the blocked accept with a connection of our own, wait for the loop
+        // to see it is no longer running, and only then free the fd. If the wake
+        // can't connect (socket file gone, backlog full), closing the fd ends the
+        // loop instead, so there is nothing to wait for.
+        if wasRunning, fd >= 0, SocketEndpoint.isLive(path: socketURL.path) {
+            _ = acceptLoopExited.wait(timeout: .now() + 1)
+        }
         if fd >= 0 { close(fd) }
+        // Only a server that was listening owns the path; another instance may.
+        guard wasRunning else { return }
         try? FileManager.default.removeItem(at: socketURL)
         BridgeLog.info("stopped listening", category: .bridge)
     }
@@ -171,8 +203,14 @@ public final class BridgeServer: @unchecked Sendable {
     // MARK: Accept
 
     private func acceptLoop(_ listenFD: Int32) {
+        defer { acceptLoopExited.signal() }
         while isRunning {
             let fd = Darwin.accept(listenFD, nil, nil)
+            guard isRunning else {
+                // stop()'s wake-up connection, or one that raced it.
+                if fd >= 0 { close(fd) }
+                return
+            }
             guard fd >= 0 else {
                 if errno == EINTR { continue }
                 // A closed listening socket is the normal shutdown path, not a fault.
@@ -180,6 +218,15 @@ public final class BridgeServer: @unchecked Sendable {
                     observe(.serverError("accept failed: \(String(cString: strerror(errno)))"))
                 }
                 return
+            }
+
+            // Only this user's processes. The private folder and socket mode
+            // already ensure it; checking the kernel's answer as well means a
+            // permissions slip can't hand someone else the calendar.
+            guard SocketEndpoint.peerUID(fd) == getuid() else {
+                BridgeLog.warning("refused a connection from another user", category: .bridge)
+                close(fd)
+                continue
             }
 
             var on: Int32 = 1
@@ -196,7 +243,21 @@ public final class BridgeServer: @unchecked Sendable {
     // MARK: Per-connection
 
     private func serve(_ fd: Int32) {
-        defer { close(fd) }
+        stateLock.lock()
+        // Accepted just before stop() swept the connections: end it here instead.
+        let stillRunning = running
+        if stillRunning { connectionFDs.insert(fd) }
+        stateLock.unlock()
+        guard stillRunning else {
+            close(fd)
+            return
+        }
+        defer {
+            stateLock.lock()
+            connectionFDs.remove(fd)
+            stateLock.unlock()
+            close(fd)
+        }
 
         var framer = LineFramer()
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
@@ -317,7 +378,7 @@ public final class BridgeServer: @unchecked Sendable {
                 }
                 if let refusal = await authorize(request, identity) {
                     response = .failure(id: request.id, refusal)
-                    observe(.call(identity, tool: name, ok: false, detail: "denied"))
+                    observe(.call(identity, tool: name, ok: false, detail: refusal))
                     return
                 }
                 let started = Date()
