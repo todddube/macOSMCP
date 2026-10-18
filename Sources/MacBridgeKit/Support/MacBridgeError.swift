@@ -20,6 +20,9 @@ public enum MacBridgeError: Error, LocalizedError, Equatable {
     case invalidArgument(name: String, reason: String)
     /// TCC access to a macOS domain has not been granted.
     case accessDenied(domain: EventKitDomain, status: String, underlying: String? = nil)
+    /// macOS didn't answer an access request in time, usually because its prompt
+    /// can't be shown or nobody has answered it yet.
+    case accessPending(domain: EventKitDomain, seconds: Int)
     /// A calendar or reminder list could not be resolved by name or id.
     case notFound(kind: String, identifier: String)
     /// The target exists but macOS will not let us write to it.
@@ -31,6 +34,12 @@ public enum MacBridgeError: Error, LocalizedError, Equatable {
     /// The call carried argument names the tool does not take. `suggestions` maps
     /// each unknown name to the likeliest intended one, where there is one.
     case unknownArguments(tool: String, names: [String], suggestions: [String: String], accepted: [String])
+
+    /// True for ``accessPending(domain:seconds:)``.
+    var isAccessPending: Bool {
+        if case .accessPending = self { return true }
+        return false
+    }
 
     /// The message with every user-supplied value left out — titles, names, ids and
     /// echoed input — for the log file and the unified log, which a user may attach
@@ -44,7 +53,7 @@ public enum MacBridgeError: Error, LocalizedError, Equatable {
             return "No \(kind) matching the given name or id."
         case .notWritable(let kind, _):
             return "The \(kind) is read-only."
-        case .missingArgument, .accessDenied, .saveFailed, .unknownTool, .unknownArguments:
+        case .missingArgument, .accessDenied, .accessPending, .saveFailed, .unknownTool, .unknownArguments:
             // Argument names, tool names and macOS's own wording: no calendar data.
             return errorDescription ?? "\(self)"
         }
@@ -80,6 +89,13 @@ public enum MacBridgeError: Error, LocalizedError, Equatable {
                 message += " (macOS reported: \(underlying))"
             }
             return message
+        case .accessPending(let domain, let seconds):
+            return """
+                macOS asked for permission to use \(domain.displayName) and had no answer within \(seconds) \
+                seconds, so nothing was done. If a permission prompt is showing, answer it and try again. \
+                With `macbridge mcp --direct` the prompt may not be able to appear; run \
+                `macbridge doctor --request` in Terminal once to answer it there.
+                """
         case .notFound(let kind, let identifier):
             return "No \(kind) matching '\(identifier)'. \(Self.recoveryHint(forMissing: kind))"
         case .notWritable(let kind, let identifier):

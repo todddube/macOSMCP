@@ -7,8 +7,9 @@
 **v1.8.0** — a free, open-source macOS **menu-bar app and MCP server** that gives Claude Code and Claude Desktop read
 and write access to your **Calendar** and **Reminders**, through EventKit, entirely on your Mac.
 
-Swift package + Xcode app. No Python, no Node, no network. Requires macOS 13+.
-Free to use, modify and share under the [MIT License](LICENSE).
+Swift package + Xcode app. No Python, no Node, and no network use except **Check for Updates…**,
+when you click it. Requires macOS 13+. Free to use, modify and share under the
+[MIT License](LICENSE). To build it yourself, see [BUILDING.md](BUILDING.md).
 
 ```
   Claude Code ───stdio──┐
@@ -36,8 +37,8 @@ overdue items and upcoming items are all parameters of `reminders_search_reminde
 `calendar_search_events`. A model picks parameters more reliably than it picks between five
 near-identical tools.
 
-Dates accept `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`, full ISO-8601, or relative values — `today`,
-`tomorrow`, `now`, `+7d`, `-3d`, `+2w`. Output is always one canonical form, so a client never has
+Dates accept `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM[:SS]`, full ISO-8601, or relative values: `today`,
+`tomorrow`, `now`, `+7d`, `-3d`, `+2w`, `+1mo`, `+2h`, `+30min`. Output is always one canonical form, so a client never has
 to guess. Times are in the Mac's local time zone.
 
 `calendar_find_available_times` exists so a model proposing a meeting slot does not have to read
@@ -73,32 +74,13 @@ right-click menu, and drag it from Applications to the Trash.
 
 ### Build from source
 
-Requires **macOS 13+** and **Xcode 16+**. Everything else is in the repo: the Xcode project is
-checked in, and the one package dependency, the
-[MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk), is pinned in `Package.resolved`
-and fetched by Xcode on first open.
-
-**In Xcode:** open `MacBridge.xcodeproj`, choose the **MacBridge** scheme and press **⌘B**. The
-build installs itself to `/Applications/MacBridge.app` (see [Working in Xcode](#working-in-xcode)).
-
-**From the terminal:**
-
 ```bash
-make install     # build Release, install to /Applications, launch
+git clone https://github.com/todddube/macOSMCP.git && cd macOSMCP
+make install     # build, install to /Applications, launch
 ```
 
-Neither route needs [xcodegen](https://github.com/yonaskolb/XcodeGen). You only need it
-(`brew install xcodegen`) to regenerate the project after editing `project.yml`.
-
-Then click the menu-bar icon and **Grant** Calendar and Reminders access.
-
-TCC ties a permission grant to the app's identity *and* its location, so keep the app at
-`/Applications/MacBridge.app` — `make install` always puts it there.
-
-`make install` signs with whatever certificate it finds and tells you which you got. With an Apple
-Development or Developer ID certificate the grant **persists across rebuilds**; with no certificate
-it falls back to ad-hoc and you re-grant after every install. See
-[Permissions and rebuilds](#permissions-and-rebuilds).
+Needs Xcode 16.3 or later. Then **Grant** and **Connect** as above. [BUILDING.md](BUILDING.md) covers
+the rest: tests, Xcode, signing so permissions survive rebuilds, and making a release.
 
 ## First run
 
@@ -125,7 +107,7 @@ panel states where you are:
   CONNECTED CLIENTS                                 1
     ● Claude Code                              pid 49823
 
-  RECENT ACTIVITY                                Clear
+  RECENT ACTIVITY
     14:02:11  reminders_search_reminders    Claude Code
     14:01:58  calendar_search_events        Claude Code
     14:01:40  — connected —                 Claude Code
@@ -193,93 +175,6 @@ A shim derives the same socket name as the app in its own bundle, so it can only
 copy, and the handshake also carries the bundle path as a second check. The panel warns when your
 clients are configured for a different copy than the one running.
 
-### Permissions and rebuilds
-
-TCC keys a permission grant to the app's **code signature**, so how the app is signed decides
-whether grants survive a rebuild.
-
-The checked-in `Config/Signing.xcconfig` signs **ad-hoc**, so a fresh clone builds with no certificate or
-Apple account. `make signing` (which `make project` also runs) looks for a certificate on your Mac
-and writes a gitignored, machine-local `Config/Signing.local.xcconfig`, which `Config/Signing.xcconfig` includes
-and which overrides the ad-hoc default:
-
-| Identity found | Effect |
-|---|---|
-| Developer ID or Apple Development | Designated requirement is *bundle ID + certificate*. **Grants persist across rebuilds.** |
-| None | Ad-hoc. The signature's own hash is its identity, and it changes every build, so **macOS revokes Calendar and Reminders on each install** and you re-grant from the panel. |
-
-`make install` reports which of the two you got.
-
-The certificate is referenced by SHA-1 hash rather than name, deliberately: Xcode's manual signing
-resolves the name `"Apple Development"` to a *Mac* Development certificate and fails with
-*"No Account for Team …"* when no Xcode account matches the team — even though the certificate and
-its private key are right there in the keychain. The hash is used directly and sidesteps that.
-
-Verified rather than assumed — rebuilding and reinstalling changes the code hash but not the
-requirement:
-
-```
-cdhash changed:      YES
-requirement changed: no      ← what TCC matches
-designated => identifier "com.thedubes.macbridge" and anchor apple generic
-              and certificate leaf[subject.CN] = "Apple Development: …"
-```
-
-Note that the in-tool permission request cannot reliably raise a prompt from a menu-bar-only app.
-Use the **Grant…** buttons in the panel, which ask from a real user action.
-
-### Icons
-
-The artwork is **code**, not checked-in binaries. `Tools/generate-icons.swift` draws the app icon
-with CoreGraphics into `App/Assets.xcassets` (re-run with `make icons` after editing it), and
-`BridgeRenderer` in `App/BridgeTraffic.swift` draws the menu-bar icon live.
-
-- **App icon** — a Mac mini under a suspension bridge: the machine on one side, the assistant on
-  the other, MacBridge as the span. Composed to survive 16px, where it reduces to a blue tile, a
-  pale slab and a bright arc; the hangers, port and power LED appear only at 128px and up.
-- **Menu bar** — the same span, drawn in the menu bar's text colour (white on a dark bar), with
-  calls driving across it as coloured cars. A break in the deck shows missing permissions or a
-  stopped bridge without opening the panel. Two dots underneath show Claude Code (left) and Claude
-  Desktop (right). Green means all is well: steady while the client is closed or not yet set up,
-  a slow breath while it's connected, and a quick flash while traffic flows. Flashing yellow (a
-  failed call or a missing permission) and flashing red (calls can't succeed) mark real problems
-  and glow. Under Reduce Motion the dots hold still.
-
-Generated rather than drawn in a design tool so the art is reviewable in a diff, reproducible, and
-tweakable without leaving the repo — the machine has no SVG converter and this needs none.
-
-### Signing, entitlements and distribution
-
-| Setting | Value | Why |
-|---|---|---|
-| `com.apple.security.personal-information.calendars` / `.reminders` | true | **Required under the hardened runtime.** Without them TCC sets `promptPolicy = 0` and silently refuses to ever show a permission prompt. |
-| Hardened runtime | on | Required for notarization. |
-| Sandbox | **off** | EventKit would survive a sandbox, but the bridge socket lives at a fixed Application Support path rather than in a container, so a shim spawned by any client can find it. |
-| `get-task-allow` | stripped in Release | Xcode injects it when signing with a development identity; notarization rejects it. |
-| Usage strings | Calendars, Reminders | TCC will not prompt at all without one — a missing string denies silently. |
-
-Entitlements are **generated** from `project.yml` into `App/MacBridge.entitlements`, the same as
-Info.plist. Editing that file by hand does nothing; `make project` overwrites it. (It shipped as an
-empty `<dict/>` for several commits precisely because the properties were not declared here.)
-
-**To make a release** for other Macs you need the paid Apple Developer Program and a *Developer ID
-Application* certificate, which an Apple Development certificate can't stand in for:
-
-1. Xcode → Settings → Accounts → sign in, select the team → **Manage Certificates → +** →
-   Developer ID Application. Needs the Account Holder or Admin role.
-2. `xcrun notarytool store-credentials macbridge-notary --apple-id <id> --team-id <TEAMID>
-   --password <app-specific-password>`
-3. `make release` runs the tests, builds with the Developer ID certificate (which `make signing` now
-   prefers over Apple Development), packs `MacBridge-<version>.dmg` with an Applications shortcut,
-   signs it, notarizes it, staples the ticket, and checks it the way Gatekeeper will.
-4. `make publish` uploads that DMG and its SHA-256 as a **draft** GitHub release tagged
-   `v<version>`, so you can review the notes before publishing.
-
-`make release` checks the certificate and the notary credentials up front and says which is
-missing, rather than failing somewhere inside `notarytool`. Switching from an Apple Development to a
-Developer ID signature changes the app's identity, so grant Calendar and Reminders once more after
-the first such install.
-
 ## Connect a client
 
 **Claude Code**
@@ -316,129 +211,27 @@ app only has to answer *what tools exist* and *run this one*. That keeps the app
 the thing that owns TCC, the activity log and eventually consent — and keeps MCP version churn on
 the shim side. Both ship in the same bundle, so they always update together.
 
-## Commands
+## Command line
+
+The app's binary is also a command-line tool:
 
 ```bash
-make help       # every target
-make build      # SwiftPM: MacBridgeKit + the macbridge CLI
-make test       # 109 tests, 15 suites; needs no permissions, touches no user data
-make app        # build MacBridge.app
-make install    # build Release, install to /Applications, launch
-make project    # regenerate MacBridge.xcodeproj from project.yml
-make signing    # re-detect the signing identity
-make icons      # redraw the app and menu-bar icons
-make doctor     # permissions, bridge status, tool inventory
-make tools      # list the tools
-make verify     # live write round-trip on a disposable list, then deletes it
-make release    # signed, notarized, stapled DMG for distribution (needs a Developer ID)
-make publish    # upload that DMG as a draft GitHub release
-make clean      # remove build directories
+M=/Applications/MacBridge.app/Contents/MacOS/macbridge
+$M doctor             # permissions, bridge status, client setup, tool inventory
+$M doctor --request   # the same, asking macOS for any permission not yet decided
+$M tools              # list the tools
+$M mcp                # what clients run: MCP over stdio, through the app
+$M mcp --direct       # MCP with EventKit in this process, no app needed
+$M --version
 ```
 
-`make verify` runs the live suites, which create a scratch Reminders list, exercise every write
-path against it and delete it again. They need real permission, and each domain is gated
-independently — if Calendar is not granted, the Calendar suite *skips* rather than fails.
-`make test` leaves them off entirely.
+`mcp --direct` is a fallback for anyone who doesn't want the menu-bar app. It follows Read-only,
+refuses deletes while Ask before deleting is on (it has nowhere to ask), and asks macOS for
+permission itself. If that request can't show a prompt, the call gives up after a minute and says
+to run `doctor --request` once.
 
-`macbridge mcp --direct` skips the app and runs EventKit in the CLI process: a fallback for anyone
-who does not want the menu-bar app.
-
-Note that `macbridge doctor` run from a terminal reports **the terminal's** permissions, not the
-app's, because macOS attributes a CLI process's TCC to its responsible parent. The menu-bar panel
-is the accurate view of what the app itself holds.
-
-## Layout
-
-```
-project.yml              Xcode project spec — targets, build settings, Info.plist
-MacBridge.xcodeproj/     generated from project.yml; checked in so Xcode builds a fresh clone
-Config/Signing.xcconfig  ad-hoc signing default; includes the local Signing.local.xcconfig
-Package.swift            SwiftPM: the kit, the CLI, the tests
-App/                     the menu-bar app (Xcode target only)
-  main.swift             entry point: GUI or CLI, decided by the arguments
-  MacBridgeApp.swift     MenuBarExtra scene and app delegate
-  AppModel.swift         bridge lifecycle, permissions, clipboard helpers
-  MenuContent.swift      the panel: status, permissions, clients, activity
-  ActivityLog.swift      bounded in-memory log, never written to disk
-  StatusItemController.swift  right-click menu and client status dots
-  BridgeTraffic.swift    traffic animation on the bridge glyph
-  AboutWindow.swift      About window: author, license, third-party credits
-  InstallLocation.swift  offers to move a downloaded copy into /Applications
-  LaunchAtLogin.swift    "Open MacBridge at login" via SMAppService
-Sources/
-  MacBridgeKit/          all logic; no AppKit, so it stays terminal-testable
-    Calendar/            CalendarService (actor), FreeBusy, Recurrence, mapping
-    Reminders/           RemindersService (actor), mapping
-    EventKit/            authorization, calendar and list resolution
-    IPC/                 bridge protocol, framing, socket server and client
-    Setup/               client config detection and process-tree client naming
-    Tools/               tool definitions, JSON schemas, ToolRegistry
-    Support/             dates, argument coercion, errors, logging, credits
-  macbridge/             CLI subcommands, shared by both entry points
-Tools/
-  generate-icons.swift   draws the icons into App/Assets.xcassets
-Tests/MacBridgeKitTests/ swift-testing suites, including the opt-in live ones
-LICENSE                  MIT, bundled into the app
-THIRD_PARTY_NOTICES.md   credits and full license texts, bundled into the app
-```
-
-Both services are actors because `EKEventStore` is neither thread-safe nor `Sendable`. No EventKit
-object escapes them — everything is mapped to a `Value` before returning — which is the whole
-safety argument.
-
-`ToolRegistry` holds a name → handler table rather than a switch, so the advertised inventory and
-the routable set can be compared directly. A tool that is advertised but never wired up fails a
-test instead of failing the first time a model calls it.
-
-## Building
-
-`MacBridge.xcodeproj` is **generated** from `project.yml` by `make project`, and checked in so a
-fresh clone opens and builds in Xcode without xcodegen. `project.yml` is the source of truth for
-targets, build settings *and* the Info.plist, so **`App/Info.plist` is generated too**; editing either
-by hand accomplishes nothing, because the next `make project` overwrites it. After changing
-`project.yml`, run `make project` and commit the regenerated files with it. Machine-local signing
-goes in the gitignored `Config/Signing.local.xcconfig` (see [Permissions and rebuilds](#permissions-and-rebuilds)).
-
-### Working in Xcode
-
-⌘B and ⌘R run a post-action that installs the build to `/Applications`, so the copy your clients are
-configured for is always current. It deliberately does **not** launch it — Xcode launches the debug
-build with the debugger attached, and a shim auto-launches the installed copy when a client next
-connects. Because each bundle has its own socket, both can run at once without interfering.
-
-Do not point a client at a DerivedData path: TCC grants attach to it, the hash changes on every
-clean build, and Xcode may delete the directory.
-
-```bash
-open MacBridge.xcodeproj      # or `make project && open MacBridge.xcodeproj` to re-detect signing
-```
-
-Two targets, and the usual shortcuts all work:
-
-| | |
-|---|---|
-| **⌘B** | builds `MacBridge.app` — app and CLI in one binary |
-| **⌘R** | runs it; it appears in the menu bar, not the Dock (`LSUIElement`) |
-| **⌘U** | runs all 109 tests in the `MacBridgeTests` bundle, listed in the Test navigator |
-
-`MacBridgeTests` is a native Xcode test bundle compiled from the same
-`Tests/MacBridgeKitTests` sources that `swift test` uses — one set of tests, two runners, so a
-failure in Xcode is a failure in CI.
-
-The live suites are off by default. To run them from Xcode, tick `MACBRIDGE_LIVE` in
-**Product → Scheme → Edit Scheme → Test → Arguments → Environment Variables**; it is pre-added and
-unchecked. From the terminal, `make verify` does the same thing.
-
-To work on just the kit, the CLI and the tests without the app, open `Package.swift` directly.
-
-Builds go to `/private/tmp`, not `.build/`. This checkout sits under an iCloud-synced
-`~/Documents`, which stamps `com.apple.FinderInfo` on build output; codesign then rejects the
-bundle with *"resource fork, Finder information, or similar detritus not allowed"*. Override with
-`make build SCRATCH=...` if your clone is somewhere unsynced.
-
-Tests need Xcode's toolchain rather than Command Line Tools: swift-testing's macro plugin and
-`Testing.framework` ship only with Xcode. The Makefile finds it automatically, preferring a release
-Xcode over a beta.
+`doctor` run from Terminal reports **Terminal's** permissions, not the app's: macOS attributes a
+command-line tool's access to the app that launched it. The menu-bar panel shows what the app holds.
 
 ## Not yet done
 
@@ -446,7 +239,9 @@ Xcode over a beta.
   blocking one client, or limiting clients to some calendars and lists, isn't built yet.
 - **First notarized release.** `make release` and `make publish` are ready, but haven't run yet: they
   need the Developer ID certificate and notary credentials set up.
-- **Automatic updates.** New versions are downloaded from GitHub by hand for now.
+- **Automatic updates.** **Check for Updates…** (right-click menu, or About) says whether a newer
+  release is out and opens its page; installing it is still a download. MacBridge never checks on
+  its own.
 - **Connect for Cursor, Windsurf and VS Code.** One-click setup covers Claude Code and Claude
   Desktop; other clients take the command from **Manual setup**
   ([#2](https://github.com/todddube/macOSMCP/issues/2)).
@@ -579,11 +374,20 @@ invitation; `event_id` returns one event in full, with attendees and their repli
 availability. Event updates can change alerts, availability (busy, free, tentative or away) and
 how the event repeats, from one occurrence on or for the whole series; reminder updates can
 change how a reminder repeats. A repeat change that would remove occurrences asks first, like a
-delete, and changing a repeat keeps its days (a Monday, Wednesday and Friday meeting stays one). A requested alert no longer comes with Calendar's default alert as well, a repeat that
-ends on a date now includes that date, and a repeating reminder without a due date is refused
-with the reason rather than failing to save. Free-time search ignores birthdays and all-day events on
+delete, and changing a repeat keeps its days, so a Monday, Wednesday and Friday meeting stays one.
+A requested alert no longer comes with Calendar's default alert as well, a repeat that ends on a
+date now includes that date, and a repeating reminder without a due date is refused with the
+reason rather than failing to save. Free-time search ignores birthdays and all-day events on
 subscribed calendars, so a public holiday no longer blocks the whole day.
 
+**Check for Updates…**, in the right-click menu and the About window, asks GitHub for the newest
+release and offers its page; nothing is checked unless you ask. A permission request that macOS
+never answers, as when `macbridge mcp --direct` can't show its prompt, now gives up after a minute
+with a message saying what to do, instead of leaving the client waiting forever. VoiceOver reads
+the panel's section titles as headings and its status dots and failed calls in words, not by
+colour alone. CI builds and tests every push on GitHub, the MCP Swift SDK is pinned to 0.12.x so an
+update can't change its API unannounced, and [BUILDING.md](BUILDING.md) collects everything
+needed to build, test and release MacBridge yourself.
 
 **0.7.0** — About window, right-click menu, client status dots, and traffic in the menu bar.
 Two dots under the bridge glyph show Claude Code (left) and Claude Desktop (right):

@@ -193,6 +193,7 @@ final class StatusItemController: NSObject {
         if menu.items.count > 2 { menu.addItem(.separator()) }
 
         menu.addItem(item("About MacBridge", #selector(showAbout)))
+        menu.addItem(item("Check for Updates…", #selector(checkForUpdates)))
         menu.addItem(item("Report an Issue…", #selector(reportIssue)))
         menu.addItem(item("Request a Feature…", #selector(requestFeature)))
         menu.addItem(.separator())
@@ -212,6 +213,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func showAbout() { AboutWindow.show() }
+    @objc private func checkForUpdates() { UpdatePrompt.checkNow() }
     @objc private func reportIssue() { NSWorkspace.shared.open(Credits.bugReportURL) }
     @objc private func requestFeature() { NSWorkspace.shared.open(Credits.featureRequestURL) }
     @objc private func copyDiagnostics() { model.copyDiagnostics() }

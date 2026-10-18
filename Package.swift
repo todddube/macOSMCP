@@ -23,7 +23,10 @@ let package = Package(
         .executable(name: "macbridge", targets: ["macbridge"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
+        // Pinned to the minor version: the SDK is pre-1.0, where a minor release may
+        // break its API, so `from:` would take one on any `swift package update`.
+        // Raise it on purpose, after `make test` and `make verify` pass on the new one.
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")),
     ],
     targets: [
         .target(

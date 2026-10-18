@@ -23,8 +23,8 @@ public actor RemindersService {
     /// Creates a service with its own `EKEventStore`; access is requested on first use.
     public init() {}
 
-    private func ensureAccess() async throws {
-        try await EventKitAuthorization.ensureAccess(to: domain, store: store)
+    private func ensureAccess(timeout: TimeInterval = EventKitAuthorization.requestTimeout) async throws {
+        try await EventKitAuthorization.ensureAccess(to: domain, store: store, timeout: timeout)
     }
 
     /// `fetchReminders` is the one callback-based EventKit API in use; everything
@@ -362,7 +362,7 @@ public actor RemindersService {
     /// What a delete would remove, in words for the confirmation prompt; nil when
     /// it can't be found (the call itself will then fail with the reason).
     public func confirmationTarget(_ tool: String, _ args: Arguments) async -> String? {
-        guard (try? await ensureAccess()) != nil else { return nil }
+        guard (try? await ensureAccess(timeout: EventKitAuthorization.lookupTimeout)) != nil else { return nil }
         switch tool {
         case "reminders_delete_reminder":
             guard let reminder = try? fetchReminder(args, requireWritable: false) else { return nil }

@@ -464,7 +464,8 @@ final class AppModel: ObservableObject {
             // request gets a fresh one.
             let store = EKEventStore()
             do {
-                try await EventKitAuthorization.ensureAccess(to: domain, store: store)
+                // No time limit: someone is reading the prompt this opened.
+                try await EventKitAuthorization.ensureAccess(to: domain, store: store, timeout: nil)
                 BridgeLog.info("\(domain.displayName) granted", category: .permissions)
             } catch {
                 BridgeLog.warning(

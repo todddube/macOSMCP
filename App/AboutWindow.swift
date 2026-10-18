@@ -102,6 +102,7 @@ struct AboutView: View {
             HStack(spacing: 8) {
                 Button("Report an Issue…") { NSWorkspace.shared.open(Credits.bugReportURL) }
                 Button("Request a Feature…") { NSWorkspace.shared.open(Credits.featureRequestURL) }
+                Button("Check for Updates…") { UpdatePrompt.checkNow() }
             }
             .controlSize(.small)
 

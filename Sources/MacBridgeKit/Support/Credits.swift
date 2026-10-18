@@ -36,6 +36,8 @@ public enum Credits {
     public static let repositoryURL = URL(string: "https://github.com/todddube/macOSMCP")!
     /// `LICENSE` on the repository's main branch.
     public static let licenseURL = URL(string: "https://github.com/todddube/macOSMCP/blob/main/LICENSE")!
+    /// Every published release, newest first.
+    public static let releasesURL = URL(string: "https://github.com/todddube/macOSMCP/releases")!
     /// The repository's issue list, for browsing what is already reported.
     public static let issuesURL = URL(string: "https://github.com/todddube/macOSMCP/issues")!
     /// The new-issue page, opened on the bug-report form.

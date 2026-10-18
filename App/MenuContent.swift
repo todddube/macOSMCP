@@ -49,6 +49,16 @@ struct MenuContent: View {
         }
     }
 
+    /// A section's small caps title, read by VoiceOver as a heading so the panel
+    /// can be navigated section by section.
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityLabel(title)
+    }
+
     // MARK: Header
 
     private var header: some View {
@@ -56,6 +66,7 @@ struct MenuContent: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("MacBridge \(MacBridge.version)")
                     .font(.headline)
@@ -64,6 +75,7 @@ struct MenuContent: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .accessibilityElement(children: .combine)
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
                 Text("\(model.toolCount) tools")
@@ -89,6 +101,9 @@ struct MenuContent: View {
                         .foregroundStyle(.secondary)
                 }
                 .help("\(entry.client.name): \(entry.health.reason)")
+                // The dot's colour is the status; VoiceOver gets the words instead.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(entry.client.name): \(entry.health.reason)")
             }
         }
     }
@@ -145,18 +160,22 @@ struct MenuContent: View {
 
     private var permissions: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("PERMISSIONS")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+            sectionTitle("Permissions")
 
             ForEach(EventKitDomain.allCases, id: \.self) { domain in
                 HStack(spacing: 6) {
-                    Image(systemName: model.hasAccess(domain) ? "checkmark.circle.fill" : "exclamationmark.circle")
-                        .foregroundStyle(model.hasAccess(domain) ? .green : .orange)
-                    Text(domain.displayName)
-                    Text(model.isRestricted(domain) ? "managed by your organization" : model.statusText(domain))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // An HStack, not a Group: a Group's modifiers apply to each child
+                    // separately, so .combine on it would merge nothing.
+                    HStack(spacing: 6) {
+                        Image(systemName: model.hasAccess(domain) ? "checkmark.circle.fill" : "exclamationmark.circle")
+                            .foregroundStyle(model.hasAccess(domain) ? .green : .orange)
+                            .accessibilityHidden(true)
+                        Text(domain.displayName)
+                        Text(model.isRestricted(domain) ? "managed by your organization" : model.statusText(domain))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
                     Spacer()
                     // A restricted domain can't be granted here or in System Settings,
                     // so a Grant button would lead nowhere.
@@ -175,9 +194,7 @@ struct MenuContent: View {
     /// deleting covers the three tools that can't be undone.
     private var safety: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("SAFETY")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+            sectionTitle("Safety")
 
             Toggle("Read-only", isOn: $model.policy.readOnly)
                 .toggleStyle(.checkbox)
@@ -208,9 +225,7 @@ struct MenuContent: View {
     private var setup: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("CLIENT SETUP")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                sectionTitle("Client Setup")
                 Spacer()
                 Button("Re-check") { model.refreshClientSetup() }
                     .buttonStyle(.link)
@@ -236,12 +251,14 @@ struct MenuContent: View {
             HStack(spacing: 6) {
                 Image(systemName: icon(for: client.status))
                     .foregroundStyle(tint(for: client.status))
+                    .accessibilityHidden(true)
                 Text(client.name)
                 Spacer()
                 Text(label(for: client.status))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .combine)
 
             switch client.status {
             case .ready:
@@ -357,9 +374,7 @@ struct MenuContent: View {
     private var clients: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("CONNECTED CLIENTS")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                sectionTitle("Connected Clients")
                 Spacer()
                 Text("\(log.clients.count)")
                     .font(.caption2)
@@ -374,6 +389,7 @@ struct MenuContent: View {
                 ForEach(log.clients) { client in
                     HStack(spacing: 6) {
                         Circle().fill(.green).frame(width: 6, height: 6)
+                            .accessibilityHidden(true)
                         Text(client.displayName)
                         Spacer()
                         // This row is where per-client allow/deny will live.
@@ -381,6 +397,7 @@ struct MenuContent: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
@@ -395,9 +412,7 @@ struct MenuContent: View {
     private var activity: some View {
         let rows = log.recent
         return VStack(alignment: .leading, spacing: 6) {
-            Text("RECENT ACTIVITY")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+            sectionTitle("Recent Activity")
 
             BridgeTrafficView(
                 traffic: traffic,
@@ -442,6 +457,9 @@ struct MenuContent: View {
                         }
                     }
                     .help(entry.ok ? "" : entry.detail ?? "")
+                    // Red is the only sign of a failure on screen; say it.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(activityLabel(entry))
                 }
 
                 if log.totalCalls > rows.count {
@@ -452,6 +470,19 @@ struct MenuContent: View {
                 }
             }
         }
+    }
+
+    /// One activity row in words: the time, the tool, whether it failed and why.
+    private func activityLabel(_ entry: ActivityLog.Entry) -> String {
+        var parts = [entry.timeText, entry.tool]
+        if entry.repeatCount > 1 { parts.append("\(entry.repeatCount) times") }
+        if entry.ok {
+            if let summary = entry.summary { parts.append(summary) }
+        } else {
+            parts.append("failed")
+            if let detail = entry.detail { parts.append(detail) }
+        }
+        return parts.joined(separator: ", ")
     }
 
     // MARK: Footer
@@ -470,9 +501,7 @@ struct MenuContent: View {
 
             Divider()
 
-            Text("DIAGNOSTICS")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+            sectionTitle("Diagnostics")
             HStack(spacing: 6) {
                 Button("Open Log") { model.openLog() }
                     .controlSize(.small)

@@ -4,7 +4,7 @@ These rules apply on top of the global baseline in `~/.claude/swift-standards.md
 Where the two disagree, this file wins. The `swift-code-reviewer` agent keeps the
 "Platform baseline" current.
 
-Last verified: 2026-10-05
+Last verified: 2026-10-18
 
 ## Platform baseline
 
@@ -16,7 +16,8 @@ Last verified: 2026-10-05
 | Deployment target | macOS 13 | `Package.swift` `platforms` |
 | Tests | swift-testing only | `Tests/`; `make test` (needs Xcode) |
 | UI | SwiftUI `MenuBarExtra` + AppKit | `App/` |
-| Dependencies | `modelcontextprotocol/swift-sdk` (`MCP`) only | `Package.swift` |
+| Dependencies | `modelcontextprotocol/swift-sdk` (`MCP`) only, pinned `0.12.x` | `Package.swift` (`.upToNextMinor`) and `project.yml` (`minorVersion`); a test keeps them equal |
+| Minimum Xcode | 16.3 (swift-sdk 0.12 declares tools 6.1) | CI: `macos-15` runner |
 | License | MIT, © 2026 Todd Dube | `LICENSE`, `THIRD_PARTY_NOTICES.md`, `Credits.swift` |
 
 **Deliberate decisions. Do not flag these:**
@@ -78,5 +79,6 @@ Keep the year as the year of first publication; don't bump it per edit.
 - MCP Swift SDK: https://github.com/modelcontextprotocol/swift-sdk
 
 Changes:
+- 2026-10-18 — Baseline: swift-sdk pinned to 0.12.x in both manifests; minimum Xcode 16.3; CI added.
 - 2026-10-09 — MIT copyright line in every header; credits rule for dependencies.
 - 2026-10-05 — Initial project standards; general rules moved to the global file.

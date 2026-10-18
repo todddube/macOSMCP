@@ -42,8 +42,8 @@ public actor CalendarService {
     /// Creates a service with its own `EKEventStore`; access is requested on first use.
     public init() {}
 
-    private func ensureAccess() async throws {
-        try await EventKitAuthorization.ensureAccess(to: domain, store: store)
+    private func ensureAccess(timeout: TimeInterval = EventKitAuthorization.requestTimeout) async throws {
+        try await EventKitAuthorization.ensureAccess(to: domain, store: store, timeout: timeout)
     }
 
     // MARK: - calendar_list_calendars
@@ -471,7 +471,7 @@ public actor CalendarService {
     /// confirmation prompt; nil when it can't be found (the call itself will then
     /// fail with the reason).
     public func confirmationTarget(_ args: Arguments) async -> String? {
-        guard (try? await ensureAccess()) != nil,
+        guard (try? await ensureAccess(timeout: EventKitAuthorization.lookupTimeout)) != nil,
               let span = try? resolveSpan(args),
               let event = try? fetchEvent(args, span: span, requireWritable: false)
         else { return nil }
@@ -506,7 +506,7 @@ public actor CalendarService {
     /// confirmed like a delete.
     public func repeatChangeTarget(_ args: Arguments) async -> (needed: Bool, target: String?) {
         guard Recurrence.isRequested(in: args) else { return (false, nil) }
-        guard (try? await ensureAccess()) != nil else { return (true, nil) }
+        guard (try? await ensureAccess(timeout: EventKitAuthorization.lookupTimeout)) != nil else { return (true, nil) }
 
         // Each check below matches one the call makes itself, which refuses a
         // repeat change on a single occurrence and an event it can't find; asking

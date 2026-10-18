@@ -37,4 +37,24 @@ struct VersionTests {
 
         #expect(declared == MacBridge.version)
     }
+
+    /// The MCP SDK is pinned twice too: Package.swift for SwiftPM, project.yml for
+    /// the Xcode build of the app. Different pins would build the CLI and the app
+    /// against different SDKs.
+    @Test func sdkPinMatchesBetweenPackageAndProject() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let package = try String(contentsOf: root.appendingPathComponent("Package.swift"), encoding: .utf8)
+        let project = try String(contentsOf: root.appendingPathComponent("project.yml"), encoding: .utf8)
+
+        let packagePin = try #require(
+            package.firstMatch(of: #/swift-sdk\.git", \.upToNextMinor\(from: "([0-9.]+)"\)/#)?.1,
+            "Package.swift should pin swift-sdk with .upToNextMinor(from:)"
+        )
+        let projectPin = try #require(
+            project.firstMatch(of: #/minorVersion: ([0-9.]+)/#)?.1,
+            "project.yml should pin swift-sdk with minorVersion"
+        )
+        #expect(packagePin == projectPin)
+    }
 }

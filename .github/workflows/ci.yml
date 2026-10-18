@@ -1,0 +1,91 @@
+# MacBridge CI: builds the CLI, runs the tests, and builds the app bundle.
+# Copyright © 2026 Todd Dube. Licensed under the MIT License; see LICENSE.
+#
+# Runs what a contributor would run locally (see BUILDING.md), with no secrets:
+# the app is signed ad-hoc, since `make signing` finds no certificate on a runner.
+# Live EventKit tests (`make verify`) need Calendar and Reminders permissions,
+# which a runner can't grant, so they stay a local step.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # -o pipefail, so a failing command piped into another still fails the step.
+    shell: bash -eo pipefail {0}
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: /private/tmp/macbridge-build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+
+      # The Makefile looks for /Applications/Xcode.app; pass the runner's selected
+      # Xcode instead, so an image without that path still works.
+      - name: Build the CLI
+        run: make build
+
+      - name: Test
+        run: make test XCODE_DEV="$(xcode-select -p)"
+
+  app:
+    name: Build the app
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Building the committed MacBridge.xcodeproj needs no xcodegen. This flags
+      # a project.yml change that wasn't regenerated and committed. A warning, not
+      # a failure: a newer xcodegen on the runner can word the same project
+      # differently.
+      - name: Project is in step with project.yml
+        run: |
+          brew install xcodegen
+          xcodegen --version
+          xcodegen generate
+          git checkout -- MacBridge.xcodeproj/xcshareddata  # xcodegen reorders the scheme; not a real change
+          generated="MacBridge.xcodeproj App/Info.plist App/MacBridge.entitlements"
+          if ! git diff --quiet $generated; then
+            echo "::warning::Files generated from project.yml differ from the committed ones. If project.yml changed, run 'make project' and commit the result."
+            git diff --stat $generated
+            git checkout -- $generated
+          fi
+
+      # The scheme's post-action also installs the build to /Applications on the
+      # runner, which is harmless there.
+      - name: Build MacBridge.app
+        run: make app XCODE_DEV="$(xcode-select -p)"
+
+      - name: Check the bundle
+        run: |
+          app=/private/tmp/macbridge-dd/Build/Products/Release/MacBridge.app
+          "$app/Contents/MacOS/macbridge" --version
+          count=$("$app/Contents/MacOS/macbridge" tools | awk '/ tools$/ {print $1}')
+          echo "$count tools"
+          test "$count" = 18

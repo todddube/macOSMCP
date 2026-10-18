@@ -56,7 +56,7 @@ packages:
     path: .
   swift-sdk:
     url: https://github.com/modelcontextprotocol/swift-sdk.git
-    from: 0.11.0
+    minorVersion: 0.12.1   # pre-1.0: keep to 0.12.x; must match Package.swift
 
 targets:
   # One target, one binary: MacBridge.app/Contents/MacOS/macbridge is both the
