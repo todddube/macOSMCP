@@ -87,6 +87,8 @@ public enum BridgeLog {
 
     private static let loggers = OSAllocatedUnfairLock<[String: Logger]>(initialState: [:])
     private static let fileLock = NSLock()
+    /// Set once permissions have been tightened in this process; guarded by `fileLock`.
+    private static var permissionsChecked = false
 
     /// Rotated at 512 KB, one generation kept. Enough to cover a session or two of
     /// history without ever needing attention.
@@ -129,6 +131,14 @@ public enum BridgeLog {
         let manager = FileManager.default
         do {
             try manager.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+            if !permissionsChecked {
+                // The log names clients and tools, and older versions wrote titles
+                // into it, so it is the user's alone — including a file and folder
+                // left world-readable by an earlier version.
+                permissionsChecked = true
+                try? manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: logDirectory.path)
+                try? manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            }
 
             let url = fileURL
             if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
@@ -147,6 +157,7 @@ public enum BridgeLog {
                 try handle.write(contentsOf: data)
             } else {
                 try data.write(to: url)
+                try? manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             }
         } catch {
             // Logging must never take the app down, and there is nowhere left to

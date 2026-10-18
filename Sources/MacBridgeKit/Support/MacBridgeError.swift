@@ -32,6 +32,39 @@ public enum MacBridgeError: Error, LocalizedError, Equatable {
     /// each unknown name to the likeliest intended one, where there is one.
     case unknownArguments(tool: String, names: [String], suggestions: [String: String], accepted: [String])
 
+    /// The message with every user-supplied value left out — titles, names, ids and
+    /// echoed input — for the log file and the unified log, which a user may attach
+    /// to a public bug report. The full ``errorDescription`` still reaches the model
+    /// and the menu-bar activity list.
+    public var logDescription: String {
+        switch self {
+        case .invalidArgument(let name, _):
+            return "Invalid value for '\(name)'."
+        case .notFound(let kind, _):
+            return "No \(kind) matching the given name or id."
+        case .notWritable(let kind, _):
+            return "The \(kind) is read-only."
+        case .missingArgument, .accessDenied, .saveFailed, .unknownTool, .unknownArguments:
+            // Argument names, tool names and macOS's own wording: no calendar data.
+            return errorDescription ?? "\(self)"
+        }
+    }
+
+    /// Where to look for a valid value after a lookup by name or id fails.
+    ///
+    /// Keyed on the kind rather than a calendar-or-not test, which sent a model
+    /// looking for a missing *event* or *reminder* to the list of lists.
+    static func recoveryHint(forMissing kind: String) -> String {
+        switch kind {
+        case "calendar": return "Call calendar_list_calendars to see the available calendars."
+        case "calendar event": return "Call calendar_search_events to find the event and its current id."
+        case "reminder": return "Call reminders_search_reminders to find the reminder and its current id."
+        case "reminder list": return "Call reminders_list_lists to see the available lists."
+        case "source": return "Use an account name shown as \"source\" by reminders_list_lists, or omit it."
+        default: return "Search again to get a current id."
+        }
+    }
+
     public var errorDescription: String? {
         switch self {
         case .missingArgument(let name):
@@ -48,7 +81,7 @@ public enum MacBridgeError: Error, LocalizedError, Equatable {
             }
             return message
         case .notFound(let kind, let identifier):
-            return "No \(kind) matching '\(identifier)'. Call \(kind == "calendar" ? "calendar_list_calendars" : "reminders_list_lists") to see the available options."
+            return "No \(kind) matching '\(identifier)'. \(Self.recoveryHint(forMissing: kind))"
         case .notWritable(let kind, let identifier):
             return "The \(kind) '\(identifier)' is read-only (subscribed or delegated), so it cannot be modified."
         case .saveFailed(let underlying):

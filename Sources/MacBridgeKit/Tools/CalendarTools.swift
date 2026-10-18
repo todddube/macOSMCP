@@ -53,7 +53,7 @@ enum CalendarTools {
                 inputSchema: Schema.object(properties: [
                     "query": Schema.string("Case-insensitive text matched against title, location and notes."),
                     "start_date": Schema.string("Start of the range, inclusive. Defaults to today. \(Schema.dateFormats)"),
-                    "end_date": Schema.string("End of the range, inclusive. Defaults to 7 days after start_date. \(Schema.dateFormats)"),
+                    "end_date": Schema.string("End of the range, inclusive. Defaults to the end of the 7th day, counting start_date's day as the first. \(Schema.dateFormats)"),
                     "calendars": Schema.stringList("Restrict to these calendar names or ids."),
                     "include_all_day": Schema.boolean("Include all-day events.", default: true),
                     "limit": Schema.integer("Maximum events to return.", default: 50, minimum: 1, maximum: 500),
@@ -102,7 +102,7 @@ enum CalendarTools {
                         "title": Schema.string("A new title."),
                         "start": Schema.string("A new start. \(Schema.dateFormats)"),
                         "end": Schema.string("A new end. \(Schema.dateFormats)"),
-                        "all_day": Schema.boolean("Switch the event between all-day and timed."),
+                        "all_day": Schema.boolean("Switch the event between all-day and timed. Making it timed needs start."),
                         "calendar": Schema.string("Move the event to this calendar, by name or id."),
                         "location": Schema.string("A new location; empty string clears it."),
                         "notes": Schema.string("New notes; empty string clears them."),
@@ -183,7 +183,7 @@ enum CalendarTools {
                     properties: [
                         "duration_minutes": Schema.integer("How long the slot needs to be.", default: 30, minimum: 1, maximum: 1440),
                         "start_date": Schema.string("Earliest date to consider; times already past are never offered. Defaults to now. \(Schema.dateFormats)"),
-                        "end_date": Schema.string("Latest date to consider. Defaults to 7 days out. \(Schema.dateFormats)"),
+                        "end_date": Schema.string("Latest date to consider. Defaults to the end of the 7th day, counting start_date's day as the first. \(Schema.dateFormats)"),
                         "day_start_hour": Schema.integer("First hour of the working day, 0–23.", default: 9, minimum: 0, maximum: 23),
                         "day_end_hour": Schema.integer("Last hour of the working day, 1–24.", default: 17, minimum: 1, maximum: 24),
                         "calendars": Schema.stringList("Only treat these calendars as blocking."),

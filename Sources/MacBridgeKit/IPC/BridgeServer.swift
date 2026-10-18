@@ -327,10 +327,11 @@ public final class BridgeServer: @unchecked Sendable {
                     response = BridgeResponse(id: request.id, ok: true, result: value)
 
                     let summary = ActivitySummary.summarize(value)
+                    let loggedSummary = ActivitySummary.summarize(value, includeTitles: false)
                     let timing = ActivitySummary.describe(duration: elapsed).map { " in \($0)" } ?? ""
                     BridgeLog.info(
                         "\(name) ok — \(identity.displayName)"
-                            + (summary.map { " — \($0)" } ?? "") + timing,
+                            + (loggedSummary.map { " — \($0)" } ?? "") + timing,
                         category: .tools
                     )
                     observe(.call(identity, tool: name, ok: true, detail: nil,
@@ -339,7 +340,8 @@ public final class BridgeServer: @unchecked Sendable {
                     let elapsed = Date().timeIntervalSince(started)
                     let message = (error as? MacBridgeError)?.errorDescription ?? error.localizedDescription
                     response = .failure(id: request.id, message)
-                    BridgeLog.error("\(name) failed — \(identity.displayName): \(message)", category: .tools)
+                    let logged = (error as? MacBridgeError)?.logDescription ?? error.localizedDescription
+                    BridgeLog.error("\(name) failed — \(identity.displayName): \(logged)", category: .tools)
                     observe(.call(identity, tool: name, ok: false, detail: message,
                                   summary: nil, duration: elapsed))
                 }

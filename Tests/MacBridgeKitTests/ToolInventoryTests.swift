@@ -211,3 +211,31 @@ struct BridgeRetryTests {
         #expect(!BridgeClient.isSafeToRepeat(BridgeRequest(id: 1, op: .call, name: nil)))
     }
 }
+
+/// What may be persisted: the log file and the unified log hold no calendar data.
+@Suite("Log redaction")
+struct LogRedactionTests {
+
+    @Test("Logged errors keep the argument name but drop the value")
+    func errorsAreRedacted() {
+        let secret = "Dentist with Dr Smith"
+        let cases: [MacBridgeError] = [
+            .invalidArgument(name: "start", reason: "could not read '\(secret)' as a date"),
+            .notFound(kind: "reminder list", identifier: secret),
+            .notWritable(kind: "calendar", identifier: secret),
+        ]
+        for error in cases {
+            #expect(!error.logDescription.contains(secret), "\(error) leaked into the log")
+            #expect(error.errorDescription?.contains(secret) == true, "the model still gets the detail")
+        }
+        #expect(MacBridgeError.invalidArgument(name: "start", reason: "x").logDescription.contains("'start'"))
+    }
+
+    @Test("Write summaries leave titles out when asked to")
+    func summariesDropTitles() {
+        let result: Value = .object(["created": .bool(true), "event": .object(["title": .string("Dentist")])])
+        #expect(ActivitySummary.summarize(result) == "created \u{201C}Dentist\u{201D}")
+        #expect(ActivitySummary.summarize(result, includeTitles: false) == "created")
+    }
+}
+

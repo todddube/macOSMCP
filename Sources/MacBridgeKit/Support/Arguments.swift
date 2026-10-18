@@ -66,6 +66,31 @@ public struct Arguments {
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// A URL, or nil when absent or blank. Throws when the text is not a URL with a
+    /// scheme, rather than dropping it: a silently missing meeting link is worse
+    /// than an error the model can fix.
+    public func optionalURL(_ key: String) throws -> URL? {
+        guard let text = optionalString(key) else { return nil }
+        return try Self.parseURL(text, key: key)
+    }
+
+    /// ``clearableString(_:)`` for a URL: nil when absent, `.some(nil)` to clear.
+    public func clearableURL(_ key: String) throws -> URL?? {
+        guard let text = clearableString(key) else { return nil }
+        if text.isEmpty { return .some(nil) }
+        return .some(try Self.parseURL(text, key: key))
+    }
+
+    private static func parseURL(_ text: String, key: String) throws -> URL {
+        guard let url = URL(string: text), let scheme = url.scheme, !scheme.isEmpty else {
+            throw MacBridgeError.invalidArgument(
+                name: key,
+                reason: "'\(text)' is not a URL; include the scheme, as in https://example.com"
+            )
+        }
+        return url
+    }
+
     // MARK: Numbers & booleans
 
     /// The largest magnitude accepted from a JSON number.

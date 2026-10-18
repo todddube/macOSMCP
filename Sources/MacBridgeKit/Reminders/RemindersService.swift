@@ -228,7 +228,7 @@ public actor RemindersService {
             }
         }
         if let notes = args.optionalString("notes") { reminder.notes = notes }
-        if let urlString = args.optionalString("url") { reminder.url = URL(string: urlString) }
+        if let url = try args.optionalURL("url") { reminder.url = url }
         if let priority = try ReminderMapping.parsePriority(args) { reminder.priority = priority }
         if let rule = try Recurrence.rule(from: args) { reminder.addRecurrenceRule(rule) }
 
@@ -272,9 +272,7 @@ public actor RemindersService {
         if let notes = args.clearableString("notes") {
             reminder.notes = notes.isEmpty ? nil : notes
         }
-        if let urlString = args.clearableString("url") {
-            reminder.url = urlString.isEmpty ? nil : URL(string: urlString)
-        }
+        if let url = try args.clearableURL("url") { reminder.url = url }
         if let priority = try ReminderMapping.parsePriority(args) {
             reminder.priority = priority
         }

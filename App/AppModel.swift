@@ -247,7 +247,13 @@ final class AppModel: ObservableObject {
         if !recent.isEmpty {
             lines.append("")
             lines.append("Recent log")
-            lines.append(contentsOf: recent.map { "  " + $0 })
+            // Versions before 1.8.0 logged titles in curly quotes; this report is
+            // meant for a public issue, so blank any that are still in the file.
+            lines.append(contentsOf: recent.map {
+                "  " + $0.replacingOccurrences(
+                    of: "\u{201C}[^\u{201D}]*\u{201D}", with: "\u{201C}…\u{201D}", options: .regularExpression
+                )
+            })
         }
         return lines.joined(separator: "\n")
     }
@@ -339,6 +345,16 @@ final class AppModel: ObservableObject {
         EventKitAuthorization.statusDescription(permissions[domain] ?? .notDetermined)
     }
 
+    /// Grant prompts in flight; the Dock icon stays until the last one is answered.
+    private var pendingGrantRequests = 0
+    /// The activation policy to return to once no prompt is in flight.
+    private var policyBeforeGrant: NSApplication.ActivationPolicy = .accessory
+
+    /// Whether macOS policy, not the user, controls `domain`'s access.
+    func isRestricted(_ domain: EventKitDomain) -> Bool {
+        permissions[domain].map(EventKitAuthorization.isRestricted) ?? false
+    }
+
     /// Prompt for a domain, or send the user to System Settings if macOS will no
     /// longer prompt — once denied, only the user can reverse it.
     func requestAccess(to domain: EventKitDomain) {
@@ -351,7 +367,13 @@ final class AppModel: ObservableObject {
             category: .permissions
         )
 
-        guard status == .notDetermined else {
+        if EventKitAuthorization.isRestricted(status) {
+            // A profile controls this; System Settings would show a switch the user
+            // can't change. The panel says so instead of offering Grant.
+            BridgeLog.info("\(domain.displayName) is restricted by policy", category: .permissions)
+            return
+        }
+        guard EventKitAuthorization.canPrompt(status) else {
             // Once macOS has a decision on record it will never prompt again, so the
             // only route left is System Settings.
             BridgeLog.info(
@@ -366,7 +388,14 @@ final class AppModel: ObservableObject {
         // so macOS has nothing to attach the TCC prompt to and the request returns
         // silently — which is exactly the "clicking Grant does nothing" symptom.
         // Becoming a regular app for the duration gives the prompt somewhere to go.
-        let previousPolicy = NSApp.activationPolicy()
+        //
+        // Counted, because Grant can be pressed for both domains before the first
+        // prompt is answered: saving "the previous policy" per request made the
+        // second one save `.regular` and restore it last, leaving a Dock icon.
+        if pendingGrantRequests == 0 {
+            policyBeforeGrant = NSApp.activationPolicy()
+        }
+        pendingGrantRequests += 1
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -382,8 +411,17 @@ final class AppModel: ObservableObject {
                     "\(domain.displayName) not granted: \(error.localizedDescription)",
                     category: .permissions
                 )
+                // macOS offers the upgrade from write-only once. Declined, it stays
+                // write-only and later requests return at once with no prompt, so
+                // Grant would look dead again; System Settings is the way forward.
+                if EventKitAuthorization.status(for: domain).rawValue == 4 {
+                    openPrivacySettings(for: domain)
+                }
             }
-            NSApp.setActivationPolicy(previousPolicy)
+            pendingGrantRequests -= 1
+            if pendingGrantRequests == 0 {
+                NSApp.setActivationPolicy(policyBeforeGrant)
+            }
             refreshPermissions()
         }
     }
@@ -489,9 +527,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Run `claude mcp add --scope user` off the main thread, first removing every
-    /// entry that runs some copy of MacBridge, whatever it's named (`add` refuses a
-    /// name that already exists, and a stale one would launch alongside).
+    /// Run `claude mcp add --scope user` off the main thread, first removing our
+    /// entry and any plain stale copy of it, whatever it's named (`add` refuses a
+    /// name that already exists, and a stale one would launch alongside). Flags the
+    /// user added after `mcp`, and entries they set up with flags of their own, are
+    /// kept, as for Claude Desktop — see ``ClientConfigWriter/reAddPlan(forConfigAt:)``.
     ///
     /// `~/.claude.json` is read here rather than on the main thread: it is often
     /// several megabytes.
@@ -499,10 +539,10 @@ final class AppModel: ObservableObject {
         cli: String, shimPath: String, config: URL
     ) async -> (ok: Bool, message: String) {
         await Task.detached {
-            let stale = ClientConfigWriter.macbridgeEntryNames(inConfigAt: config)
-            let removed = stale.filter { run(cli, ["mcp", "remove", "--scope", "user", $0]).status == 0 }
+            let plan = ClientConfigWriter.reAddPlan(forConfigAt: config)
+            let removed = plan.remove.filter { run(cli, ["mcp", "remove", "--scope", "user", $0]).status == 0 }
             let added = run(cli, ["mcp", "add", "--scope", "user", ClientConfigWriter.serverKey,
-                                  "--", shimPath, "mcp"])
+                                  "--", shimPath, "mcp"] + plan.flags)
             if added.status == 0 {
                 BridgeLog.info("added MacBridge to Claude Code (user scope)", category: .app)
                 return (true, "Added. New Claude Code sessions will see MacBridge.")

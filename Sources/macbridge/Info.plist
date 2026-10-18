@@ -17,6 +17,10 @@
 	<string>MacBridge lets AI assistants you connect read and manage your calendar events.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>MacBridge lets AI assistants you connect read and manage your calendar events.</string>
+	<!-- Declared as in the app: without the write-only level, macOS 14+ can return
+	     from requestFullAccessToEvents silently and never show the prompt. -->
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>MacBridge lets AI assistants you connect add events to your calendars.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>MacBridge lets AI assistants you connect read and manage your reminders.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

@@ -32,12 +32,16 @@ public enum ActivitySummary {
     ]
 
     /// A few words describing `result`, or nil when nothing useful can be said.
-    public static func summarize(_ result: Value) -> String? {
+    ///
+    /// - Parameter includeTitles: false for anything persisted — the log file and
+    ///   the unified log — which must not hold calendar or reminder contents. The
+    ///   menu-bar list, which lives in memory on the user's own screen, keeps them.
+    public static func summarize(_ result: Value, includeTitles: Bool = true) -> String? {
         guard let fields = result.objectValue else { return nil }
 
         // Writes: say what happened to what, which is the part worth seeing.
         for verb in verbs where fields[verb]?.boolValue == true {
-            if let title = title(in: fields) {
+            if includeTitles, let title = title(in: fields) {
                 return "\(verb) \u{201C}\(title)\u{201D}"
             }
             return verb
@@ -47,7 +51,7 @@ public enum ActivitySummary {
         // reading rather than testing for truth.
         if let completed = fields["completed"]?.boolValue, fields["reminder"] != nil {
             let action = completed ? "completed" : "reopened"
-            if let title = title(in: fields) { return "\(action) \u{201C}\(title)\u{201D}" }
+            if includeTitles, let title = title(in: fields) { return "\(action) \u{201C}\(title)\u{201D}" }
             return action
         }
 

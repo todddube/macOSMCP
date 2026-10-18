@@ -30,14 +30,19 @@ import MacBridgeKit
 
 /// Nothing may reach stdout except MCP protocol frames, or the client's parser
 /// desynchronises and the connection dies with no useful error.
-func log(_ message: String, isError: Bool = false) {
+///
+/// - Parameter persisted: what to write to os_log and the log file instead of
+///   `message`, when `message` holds calendar or reminder contents. stderr goes to
+///   the AI client's own log, which already records every call in full.
+func log(_ message: String, isError: Bool = false, persisted: String? = nil) {
     // stderr is what the AI client captures into its own MCP log, which is the first
     // place anyone looks; BridgeLog adds os_log and the persistent file.
     FileHandle.standardError.write(Data(("macbridge: " + message + "\n").utf8))
+    let stored = persisted ?? message
     if isError {
-        BridgeLog.error(message, category: .cli)
+        BridgeLog.error(stored, category: .cli)
     } else {
-        BridgeLog.info(message, category: .cli)
+        BridgeLog.info(stored, category: .cli)
     }
 }
 
@@ -53,6 +58,7 @@ func printUsage() {
           macbridge doctor             Report permissions, bridge status and tool inventory
           macbridge doctor --request   Same, but prompt for any access not yet decided
           macbridge tools [--schemas]  List the tools this server exposes
+          macbridge --version          Print the version
           macbridge --help             Show this message
 
         CLIENT SETUP
@@ -83,7 +89,7 @@ func runDoctor(requestAccess: Bool) async {
         let store = EKEventStore()
         var status = EventKitAuthorization.status(for: domain)
 
-        if requestAccess, status == .notDetermined {
+        if requestAccess, EventKitAuthorization.canPrompt(status) {
             try? await EventKitAuthorization.ensureAccess(to: domain, store: store)
             status = EventKitAuthorization.status(for: domain)
         }
@@ -92,7 +98,7 @@ func runDoctor(requestAccess: Bool) async {
         let label = domain.displayName.padding(toLength: 12, withPad: " ", startingAt: 0)
         print("  \(mark)\(label) \(EventKitAuthorization.statusDescription(status))")
 
-        if status == .notDetermined && !requestAccess {
+        if EventKitAuthorization.canPrompt(status) && !requestAccess {
             print("      run `macbridge doctor --request` to prompt for access")
         }
         if status == .denied || status == .restricted {
@@ -212,7 +218,9 @@ func runMCPServer(backend: ToolBackend) async throws {
             let message = (error as? MacBridgeError)?.errorDescription
                 ?? (error as? BridgeClient.ClientError)?.errorDescription
                 ?? error.localizedDescription
-            log("\(params.name) failed: \(message)", isError: true)
+            let logged = (error as? MacBridgeError)?.logDescription ?? message
+            log("\(params.name) failed: \(message)", isError: true,
+                persisted: "\(params.name) failed: \(logged)")
             return CallTool.Result(
                 content: [.text(text: message, annotations: nil, _meta: nil)],
                 isError: true
@@ -258,13 +266,18 @@ func makeBackend(arguments: [String]) async throws -> ToolBackend {
 /// tells the single binary to run the GUI instead.
 enum CLI {
 
-    static let subcommands: Set<String> = ["mcp", "doctor", "tools", "--help", "-h", "help"]
+    static let subcommands: Set<String> = ["mcp", "doctor", "tools", "--help", "-h", "help", "--version", "version"]
 
     /// True when this process was invoked as a command-line tool rather than
     /// double-clicked or launched by an MCP client's `open`.
+    ///
+    /// An unknown `--flag` counts too, so it gets an error rather than silently
+    /// starting a second copy of the app (as `--version` did before it existed).
+    /// Single-dash arguments are left to the app: LaunchServices passes `-psn_…`
+    /// and Xcode passes `-NSDocumentRevisionsDebugMode YES`.
     static func isCommandLineInvocation(_ arguments: [String]) -> Bool {
         guard let first = arguments.first else { return false }
-        return subcommands.contains(first)
+        return subcommands.contains(first) || first.hasPrefix("--")
     }
 
     /// Run a subcommand. Returns normally so callers can exit as they see fit.
@@ -288,6 +301,9 @@ enum CLI {
 
         case "--help", "-h", "help":
             printUsage()
+
+        case "--version", "version":
+            print("macbridge \(MacBridge.version)")
 
         case nil:
             printUsage()

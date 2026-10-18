@@ -200,3 +200,45 @@ struct PriorityTests {
         #expect((6...9).allSatisfy { ReminderMapping.priorityLabel($0) == "low" })
     }
 }
+
+/// URLs are refused, not dropped, when they can't be read.
+@Suite("URL arguments")
+struct URLArgumentTests {
+
+    @Test("A URL with a scheme is accepted")
+    func acceptsURL() throws {
+        let args = Arguments(["url": .string("https://meet.example.com/abc")])
+        #expect(try args.optionalURL("url")?.host == "meet.example.com")
+    }
+
+    @Test("Text that isn't a URL is refused, naming the argument")
+    func refusesNonURL() {
+        #expect(throws: MacBridgeError.self) {
+            _ = try Arguments(["url": .string("meet.example.com/abc")]).optionalURL("url")
+        }
+    }
+
+    @Test("Clearing works with an empty string or null; absent means leave alone")
+    func clearable() throws {
+        #expect(try Arguments(["url": .string("")]).clearableURL("url") == .some(nil))
+        #expect(try Arguments(["url": .null]).clearableURL("url") == .some(nil))
+        #expect(try Arguments([:]).clearableURL("url") == nil)
+    }
+}
+
+/// A failed lookup points the model at the tool that lists valid values.
+@Suite("Not-found hints")
+struct NotFoundHintTests {
+
+    @Test("Each kind names its own recovery tool", arguments: [
+        ("calendar", "calendar_list_calendars"),
+        ("calendar event", "calendar_search_events"),
+        ("reminder", "reminders_search_reminders"),
+        ("reminder list", "reminders_list_lists"),
+    ])
+    func hints(kind: String, tool: String) {
+        let message = MacBridgeError.notFound(kind: kind, identifier: "x").errorDescription ?? ""
+        #expect(message.contains(tool), "\(kind): \(message)")
+    }
+}
+

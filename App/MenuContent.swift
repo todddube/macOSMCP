@@ -152,11 +152,13 @@ struct MenuContent: View {
                     Image(systemName: model.hasAccess(domain) ? "checkmark.circle.fill" : "exclamationmark.circle")
                         .foregroundStyle(model.hasAccess(domain) ? .green : .orange)
                     Text(domain.displayName)
-                    Text(model.statusText(domain))
+                    Text(model.isRestricted(domain) ? "managed by your organization" : model.statusText(domain))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if !model.hasAccess(domain) {
+                    // A restricted domain can't be granted here or in System Settings,
+                    // so a Grant button would lead nowhere.
+                    if !model.hasAccess(domain) && !model.isRestricted(domain) {
                         Button("Grant…") { model.requestAccess(to: domain) }
                             .controlSize(.small)
                     }

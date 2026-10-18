@@ -86,7 +86,9 @@ public actor CalendarService {
         let now = Date()
         let calendar = Calendar.current
 
-        // Default window: today through +7 days, the span "what's coming up" usually means.
+        // Default window: seven days starting with start_date's day — a week, which is
+        // what "what's coming up" usually means. (Adding 7 and then extending to the
+        // end of that day had made it eight.)
         // A date-only start means "from the beginning of that day"; a timed one is
         // taken as given, so "from 2pm" does not also return the morning.
         let startInput = try args.optionalDate("start_date")
@@ -95,7 +97,7 @@ public actor CalendarService {
             : calendar.startOfDay(for: startInput?.date ?? now)
 
         let endInput = try args.optionalDate("end_date")
-        let rawEnd = endInput?.date ?? calendar.date(byAdding: .day, value: 7, to: start) ?? start
+        let rawEnd = endInput?.date ?? calendar.date(byAdding: .day, value: 6, to: start) ?? start
         // A date-only end means "through the end of that day", not "at midnight",
         // otherwise "start_date=today end_date=today" would return nothing.
         var end = (endInput?.hasTime ?? false) ? rawEnd : DateParsing.endOfDay(rawEnd)
@@ -203,7 +205,7 @@ public actor CalendarService {
 
         if let location = args.optionalString("location") { event.location = location }
         if let notes = args.optionalString("notes") { event.notes = notes }
-        if let urlString = args.optionalString("url") { event.url = URL(string: urlString) }
+        if let url = try args.optionalURL("url") { event.url = url }
         if let rule = try Recurrence.rule(from: args) { event.addRecurrenceRule(rule) }
         // Bounded: `abs(Int.min)` and `minutes * 60` both trap on extreme input,
         // and a year of lead time is already absurd for an alarm.
@@ -265,18 +267,40 @@ public actor CalendarService {
         // an absent key leaves the field alone, an explicit null or "" clears it.
         if let title = args.optionalString("title") { event.title = title }
 
-        if let allDay = try args.optionalBool("all_day") { event.isAllDay = allDay }
-
         let originalDuration = (event.endDate ?? event.startDate ?? Date())
             .timeIntervalSince(event.startDate ?? Date())
+
+        var becameTimed = false
+        if let allDay = try args.optionalBool("all_day"), allDay != event.isAllDay {
+            if allDay {
+                // Snap to whole days, or the event keeps its old mid-day times and
+                // Calendar shows them oddly. The start and end days are kept.
+                let calendar = Calendar.current
+                event.isAllDay = true
+                if let start = event.startDate { event.startDate = calendar.startOfDay(for: start) }
+                if let end = event.endDate { event.endDate = calendar.startOfDay(for: end) }
+            } else {
+                // An all-day event has no time to keep; guessing one (midnight to
+                // 23:59:59) made an event nobody asked for.
+                guard args.contains("start") else {
+                    throw MacBridgeError.invalidArgument(
+                        name: "all_day",
+                        reason: "making an all-day event timed needs a start time; pass start, and end if it should last other than an hour"
+                    )
+                }
+                event.isAllDay = false
+                becameTimed = true
+            }
+        }
 
         if let startInput = try args.optionalDate("start") {
             event.startDate = event.isAllDay
                 ? Calendar.current.startOfDay(for: startInput.date)
                 : startInput.date
-            // Keep the event valid if only the start moved.
+            // Keep the event valid if only the start moved. A former all-day
+            // event's "duration" is a span of days, so it gets the usual hour.
             if !args.contains("end"), let start = event.startDate {
-                event.endDate = start.addingTimeInterval(max(originalDuration, 0))
+                event.endDate = start.addingTimeInterval(becameTimed ? 3600 : max(originalDuration, 0))
             }
         }
         if let endInput = try args.optionalDate("end") {
@@ -294,9 +318,7 @@ public actor CalendarService {
         if let notes = args.clearableString("notes") {
             event.notes = notes.isEmpty ? nil : notes
         }
-        if let urlString = args.clearableString("url") {
-            event.url = urlString.isEmpty ? nil : URL(string: urlString)
-        }
+        if let url = try args.clearableURL("url") { event.url = url }
 
         if args.contains("calendar"), let requested = args.optionalString("calendar") {
             let cal = try CalendarResolution.resolve(
@@ -434,7 +456,7 @@ public actor CalendarService {
         let requestedStart = startInput?.date ?? now
         let searchStart = max(requestedStart, Self.nextQuarterHour(after: now))
         let endInput = try args.optionalDate("end_date")
-        let rawEnd = endInput?.date ?? calendar.date(byAdding: .day, value: 7, to: requestedStart) ?? requestedStart
+        let rawEnd = endInput?.date ?? calendar.date(byAdding: .day, value: 6, to: requestedStart) ?? requestedStart
         let searchEnd = (endInput?.hasTime ?? false) ? rawEnd : DateParsing.endOfDay(rawEnd)
 
         guard searchEnd > requestedStart else {

@@ -82,7 +82,21 @@ public enum EventKitAuthorization {
         status.rawValue == 3
     }
 
-    /// Request access if it has not been decided, then throw unless we hold it.
+    /// True when asking can still change the answer: nothing decided yet, or
+    /// write-only access (macOS 14+), which a full-access request offers to upgrade.
+    /// A denial or a policy restriction can only be changed outside the app.
+    public static func canPrompt(_ status: EKAuthorizationStatus) -> Bool {
+        status.rawValue == 0 || status.rawValue == 4
+    }
+
+    /// True when a configuration profile controls the domain, so neither the user
+    /// nor a prompt can grant it.
+    public static func isRestricted(_ status: EKAuthorizationStatus) -> Bool {
+        status.rawValue == 1
+    }
+
+    /// Request access while asking can still change it (see ``canPrompt(_:)``), then
+    /// throw unless we hold it.
     ///
     /// Write-only access is treated as insufficient: every tool here reads back
     /// what it wrote so it can return the item's identifier.
@@ -92,12 +106,14 @@ public enum EventKitAuthorization {
     /// made again on `store` every time. Once macOS has decided it returns at once,
     /// with no prompt, and a `true` gives this store its own grant rather than
     /// borrowing one made on another store. It also means a real reset
-    /// (`tccutil reset`) prompts again rather than being masked.
+    /// (`tccutil reset`) prompts again rather than being masked, and a request that
+    /// is refused or fails withdraws the display override, so the panel stops
+    /// reporting a grant that no longer exists.
     public static func ensureAccess(to domain: EventKitDomain, store: EKEventStore) async throws {
         var current = systemStatus(for: domain)
         var requestError: String?
 
-        if current == .notDetermined {
+        if canPrompt(current) {
             do {
                 let granted = try await requestAccess(to: domain, store: store)
                 // The returned Bool is the one thing that tells a lagging status
@@ -116,6 +132,7 @@ public enum EventKitAuthorization {
                 // Swallowing this was hiding the actual reason a prompt never
                 // appeared, which is the single most confusing failure to debug.
                 requestError = error.localizedDescription
+                grantedInThisProcess.remove(domain)
             }
             current = systemStatus(for: domain)
         }

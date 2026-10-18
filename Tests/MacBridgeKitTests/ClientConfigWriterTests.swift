@@ -137,4 +137,88 @@ struct ClientConfigWriterTests {
         try ClientConfigWriter.install(shimPath: "/elsewhere/macbridge", configAt: config)
         #expect(try Data(contentsOf: backup) == original)
     }
+
+    @Test("Flags after mcp on our entry survive a repair")
+    func keepsUserFlags() throws {
+        let existing = Data("""
+            {"mcpServers": {"macbridge": {"command": "/old/macbridge", "args": ["mcp", "--direct"]}}}
+            """.utf8)
+        let data = try ClientConfigWriter.merged(into: existing, shimPath: shim, path: "x")
+        #expect(try macbridgeEntry(data)?["args"] as? [String] == ["mcp", "--direct"])
+    }
+
+    @Test("Another MacBridge entry with flags of its own is left alone")
+    func keepsDeliberateEntries() throws {
+        let existing = Data("""
+            {"mcpServers": {"macbridge-dev": {"command": "/dev/build/macbridge", "args": ["mcp", "--direct"]},
+                            "stale": {"command": "/old/MacBridge.app/Contents/MacOS/macbridge", "args": ["mcp"]}}}
+            """.utf8)
+        let data = try ClientConfigWriter.merged(into: existing, shimPath: shim, path: "x")
+        let servers = try #require(try object(data)["mcpServers"] as? [String: Any])
+        #expect(Set(servers.keys) == ["macbridge", "macbridge-dev"])
+    }
+
+    @Test("Install keeps permissions, skips a no-op, and saves the file before each edit")
+    func installKeepsPermissionsAndPrevious() throws {
+        let fileManager = FileManager.default
+        let dir = fileManager.temporaryDirectory
+            .appendingPathComponent("ClientConfigWriterTests-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: dir) }
+
+        let config = dir.appendingPathComponent("claude_desktop_config.json")
+        try Data(#"{"mcpServers": {}}"#.utf8).write(to: config)
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
+
+        try ClientConfigWriter.install(shimPath: shim, configAt: config)
+        let mode = try fileManager.attributesOfItem(atPath: config.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600, "an atomic rewrite must not loosen a private config")
+
+        // Already correct: not rewritten, so a hand-formatted file keeps its layout.
+        let handFormatted = Data(#"{ "mcpServers" : { "macbridge" : { "args" : ["mcp"], "command" : "\#(shim)" } } }"#.utf8)
+        try handFormatted.write(to: config)
+        try ClientConfigWriter.install(shimPath: shim, configAt: config)
+        #expect(try Data(contentsOf: config) == handFormatted)
+
+        // A real change saves the file as it was just before it.
+        try ClientConfigWriter.install(shimPath: "/elsewhere/macbridge", configAt: config)
+        let previous = config.appendingPathExtension("macbridge-previous")
+        #expect(try Data(contentsOf: previous) == handFormatted)
+    }
+
+    @Test("A new config is created readable by the user only")
+    func newFileIsPrivate() throws {
+        let fileManager = FileManager.default
+        let dir = fileManager.temporaryDirectory
+            .appendingPathComponent("ClientConfigWriterTests-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: dir) }
+
+        let config = dir.appendingPathComponent("Claude/claude_desktop_config.json")
+        #expect(try ClientConfigWriter.install(shimPath: shim, configAt: config) == nil)
+        let mode = try fileManager.attributesOfItem(atPath: config.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+    }
+
+    @Test("Re-adding through a client CLI keeps flags and deliberate entries")
+    func reAddPlan() throws {
+        let fileManager = FileManager.default
+        let dir = fileManager.temporaryDirectory
+            .appendingPathComponent("ClientConfigWriterTests-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: dir) }
+
+        let config = dir.appendingPathComponent(".claude.json")
+        try Data("""
+            {"mcpServers": {
+                "macbridge": {"command": "/old/macbridge", "args": ["mcp", "--client", "Work"]},
+                "stale": {"command": "/old/MacBridge.app/Contents/MacOS/macbridge", "args": ["mcp"]},
+                "macbridge-dev": {"command": "/dev/macbridge", "args": ["mcp", "--direct"]},
+                "other": {"command": "/usr/bin/other"}}}
+            """.utf8).write(to: config)
+
+        let plan = ClientConfigWriter.reAddPlan(forConfigAt: config)
+        #expect(plan.remove == ["macbridge", "stale"])
+        #expect(plan.flags == ["--client", "Work"])
+    }
 }
+

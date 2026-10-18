@@ -134,8 +134,10 @@ binary — so a config left over from a `DerivedData` build shows as **wrong pat
 looking fine and failing later. `macbridge doctor` prints the same information.
 
 **Connect** does the setup for you. For Claude Desktop it adds MacBridge to
-`claude_desktop_config.json`, keeping everything else in the file, and saves the original beside it
-as `claude_desktop_config.json.macbridge-backup` first. For Claude Code it runs
+`claude_desktop_config.json`, keeping everything else in the file and its permissions. It saves the
+original beside it as `claude_desktop_config.json.macbridge-backup` the first time, and the file as it
+was just before each later change as `claude_desktop_config.json.macbridge-previous`. A file that is
+already correct isn't touched. For Claude Code it runs
 `claude mcp add --scope user`. **Manual setup** still copies the command or the JSON, for anyone
 who would rather make the change themselves.
 
@@ -520,6 +522,20 @@ models actually write (`T14:00`, `2026-10-18 9:00`, fractional seconds) and `+2h
 than rounded to midnight, free-time search no longer offers slots that have already passed, and
 output follows the Mac's time zone after travel. Moving a reminder's due date replaces only the
 alarm at the old time, keeping location alarms and extra alerts.
+
+**Connect** no longer loosens a private config file's permissions, keeps flags you added after
+`mcp` (such as `--direct`), leaves alone other MacBridge entries you set up with flags of their
+own, skips the write when the file is already correct, and saves the file as it was before each
+change as `.macbridge-previous`. Event and reminder titles no longer go into the log file or the
+unified log, failures are logged without the values involved, the log is readable by you only, and
+**Copy Diagnostics** blanks titles left in logs by older versions. **Grant** no longer leaves a Dock
+icon when pressed for both permissions at once, the panel stops claiming access after a
+`tccutil reset`, a permission managed by your organization says so instead of offering Grant, and
+write-only Calendar access can be upgraded from the panel. A not-found error now points at the tool
+that finds the thing that's missing, a URL that isn't one is refused instead of dropped, switching
+an event between all-day and timed no longer leaves odd times, and the default search window is
+seven days, not eight. `macbridge --version` prints the version; an unknown `--flag` is an error
+rather than a second copy of the app.
 
 
 **0.7.0** — About window, right-click menu, client status dots, and traffic in the menu bar.
