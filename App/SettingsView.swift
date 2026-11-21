@@ -2,7 +2,7 @@
 //  SettingsView.swift
 //  MacBridge (app) · MacBridge
 //
-//  The Settings window: safety policy, launch at login and diagnostics.
+//  The Settings window: safety policy, launch at login and the splash, and diagnostics.
 //
 //  Copyright © 2026 Todd Dube. Licensed under the MIT License; see LICENSE.
 //
@@ -11,7 +11,7 @@ import AppKit
 import MacBridgeKit
 import SwiftUI
 
-/// Hosts ``SettingsView`` in its own AppKit window, for every way of opening it:
+/// Hosts the Settings tabs in their own AppKit window, for every way of opening it:
 /// the panel, the right-click menu and the app delegate's reopen handler.
 ///
 /// Not a SwiftUI `Settings` scene: opening one needs `openSettings`, which only
@@ -52,14 +52,39 @@ final class SettingsOpener: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow() -> NSWindow {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model)))
-        window.title = "MacBridge Settings"
+        // Toolbar tabs, as in a SwiftUI `Settings` scene and the system apps: an icon
+        // and label per tab in the toolbar, and the window titled after the selected tab.
+        let tabs = NSTabViewController()
+        tabs.tabStyle = .toolbar
+        tabs.addTabViewItem(tab("Safety", symbol: "lock.shield", SafetySettings(model: model)))
+        tabs.addTabViewItem(tab("General", symbol: "gearshape", GeneralSettings(model: model)))
+        tabs.addTabViewItem(tab("Diagnostics", symbol: "stethoscope", DiagnosticsSettings(model: model)))
+
+        let window = NSWindow(contentViewController: tabs)
+        // Settle the window at the panes' size now: otherwise it takes that size only
+        // when first ordered front, keeping its top-left corner, and `open()` centres
+        // it using the wrong frame.
+        tabs.view.layoutSubtreeIfNeeded()
         window.styleMask = [.titled, .closable]
-        // Kept, not released: closing then reopening should not rebuild the view.
+        window.toolbarStyle = .preference
+        // Kept, not released: closing then reopening should not rebuild the views.
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         window.delegate = self
         return window
+    }
+
+    private func tab(_ label: String, symbol: String, _ content: some View) -> NSTabViewItem {
+        let controller = NSHostingController(rootView: SettingsPane(content: content))
+        // The tab controller sizes the window from this; the pane's fixed frame sets it.
+        controller.sizingOptions = .preferredContentSize
+        // The tab controller titles the window from the selected child's `title`, not
+        // the item's label; without this the window is "Untitled".
+        controller.title = label
+        let item = NSTabViewItem(viewController: controller)
+        item.label = label
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        return item
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -68,24 +93,19 @@ final class SettingsOpener: NSObject, NSWindowDelegate {
     }
 }
 
-/// Settings, in tabs: what clients may do, startup, and the maintenance tools.
-struct SettingsView: View {
-    @ObservedObject var model: AppModel
+/// One Settings tab, at the size every tab shares so switching tabs doesn't resize
+/// the window.
+///
+/// A fixed height, not the content's: a Form scrolls, so it has no ideal height of
+/// its own, and an AppKit window sized to it collapses to the title bar. A tab with
+/// more than fits scrolls inside this.
+private struct SettingsPane<Content: View>: View {
+    let content: Content
 
     var body: some View {
-        TabView {
-            SafetySettings(model: model)
-                .tabItem { Label("Safety", systemImage: "lock.shield") }
-            GeneralSettings(model: model)
-                .tabItem { Label("General", systemImage: "gearshape") }
-            DiagnosticsSettings(model: model)
-                .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
-        }
-        .formStyle(.grouped)
-        // A fixed height, not the content's: a Form scrolls, so it has no ideal height
-        // of its own, and an AppKit window sized to it collapses to the title bar.
-        // A tab with more than fits scrolls inside this.
-        .frame(width: 460, height: 400)
+        content
+            .formStyle(.grouped)
+            .frame(width: 460, height: 400)
     }
 }
 
@@ -97,94 +117,123 @@ private struct SafetySettings: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Read-only", isOn: $model.policy.readOnly)
-                if model.policy.readOnly {
-                    StatusNote(symbol: "lock.fill", tint: .orange,
-                               text: "Clients can read your calendars and reminders but not change them.")
-                } else {
-                    Text("Clients can add, change and complete items.")
-                        .font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: $model.policy.readOnly) {
+                    Text("Read-only")
+                    Text(model.policy.readOnly
+                         ? "Clients can read your calendars and reminders but not change them."
+                         : "Clients can add, change and complete items.")
                 }
-                Toggle("Ask before deleting", isOn: $model.policy.confirmDestructive)
-                    .disabled(model.policy.readOnly)
-                Text("Deleting an event, reminder or list waits for you to allow it.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: $model.policy.confirmDestructive) {
+                    Text("Ask before deleting")
+                    Text("Deleting an event, reminder or list waits for you to allow it.")
+                }
+                .disabled(model.policy.readOnly)
             }
         }
-        .formStyle(.grouped)
     }
 }
 
-/// Launch at login. Its value is what macOS has on record, not a stored preference,
-/// so switching it off in System Settings unticks it here.
+/// Launch at login and the launch splash. The login item's value is what macOS has
+/// on record, not a stored preference, so switching it off in System Settings
+/// unticks it here.
 private struct GeneralSettings: View {
     @ObservedObject var model: AppModel
+    @AppStorage(SplashScreen.enabledKey) private var showSplash = true
 
     var body: some View {
         Form {
             Section {
-                Toggle("Open MacBridge at login", isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { model.launchAtLogin != .disabled },
                     set: { model.setLaunchAtLogin($0) }
-                ))
+                )) {
+                    Text("Open MacBridge at login")
+                    Text(LaunchAtLogin.isAvailable
+                         ? "Keeps the bridge ready for your AI clients after a restart."
+                         : "Available once MacBridge is in your Applications folder.")
+                }
                 .disabled(!LaunchAtLogin.isAvailable)
 
-                if !LaunchAtLogin.isAvailable {
-                    Text("Available once MacBridge is in your Applications folder.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if model.launchAtLogin == .requiresApproval {
-                    HStack(spacing: 6) {
-                        StatusNote(symbol: "exclamationmark.triangle.fill", tint: .orange,
-                                   text: "Switched off in System Settings.")
-                        Spacer()
+                if LaunchAtLogin.isAvailable, model.launchAtLogin == .requiresApproval {
+                    LabeledContent {
                         Button("Open Login Items…") { LaunchAtLogin.openSystemSettings() }
+                    } label: {
+                        StatusNote(symbol: "exclamationmark.triangle.fill", tint: .orange,
+                                   font: .callout, text: "Switched off in System Settings.")
                     }
-                } else if let error = model.launchAtLoginError {
-                    StatusNote(symbol: "xmark.octagon.fill", tint: .red, text: error)
-                } else {
-                    Text("Keeps the bridge ready for your AI clients after a restart.")
-                        .font(.caption).foregroundStyle(.secondary)
+                } else if LaunchAtLogin.isAvailable, let error = model.launchAtLoginError {
+                    StatusNote(symbol: "xmark.octagon.fill", tint: .red, font: .callout, text: error)
+                }
+            }
+            Section {
+                Toggle(isOn: $showSplash) {
+                    Text("Show splash screen at launch")
+                    Text("Skipped when an AI client starts MacBridge in the background.")
                 }
             }
         }
-        .formStyle(.grouped)
         // The login item can change in System Settings while this window is open.
         .onAppear { model.refreshLaunchAtLogin() }
     }
 }
 
 /// The log, the diagnostics report and the restart buttons, for when a client
-/// can't reach the bridge.
+/// can't reach the bridge. One action per row, label on the left and its button
+/// on the right, as in System Settings.
 private struct DiagnosticsSettings: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         Form {
-            Section("Logs") {
-                HStack(spacing: 8) {
+            Section("Troubleshooting") {
+                LabeledContent {
                     Button("Open Log") { model.openLog() }
+                } label: {
+                    Text("Activity log")
+                    Text("Shows the log file in Finder.")
+                }
+                LabeledContent {
                     Button("Copy Diagnostics") { model.copyDiagnostics() }
+                } label: {
+                    Text("Diagnostics report")
+                    Text("Copies a summary for a bug report.")
+                }
+                LabeledContent {
                     Button("Refresh") { model.refreshEverything() }
+                } label: {
+                    Text("Permissions and clients")
+                    Text("Checks again after you change them outside MacBridge.")
                 }
             }
             Section("Restart") {
-                HStack(spacing: 8) {
-                    // Restarting the bridge is the cheap fix for a wedged connection;
-                    // connected clients reconnect on their next call, so it is safe.
+                // Restarting the bridge is the cheap fix for a wedged connection;
+                // connected clients reconnect on their next call, so it is safe.
+                LabeledContent {
                     Button("Restart Bridge") { model.restartBridge() }
-                    Button("Relaunch App") { model.relaunchApp() }
+                } label: {
+                    Text("Bridge")
+                    Text("Rebinds the socket. Clients reconnect on their next call.")
                 }
-                Text("Restart Bridge rebinds the socket. Relaunch also picks up permission changes.")
-                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent {
+                    Button("Relaunch App") { model.relaunchApp() }
+                } label: {
+                    Text("App")
+                    Text("Also picks up Calendar and Reminders permission changes.")
+                }
             }
-            Section("This app's binary, which clients invoke") {
+            Section {
                 Text(model.shimPath)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.system(.callout, design: .monospaced))
                     .textSelection(.enabled)
                     .lineLimit(1)
                     .truncationMode(.middle)
+            } header: {
+                Text("Client command")
+            } footer: {
+                Text("The binary inside this app that AI clients run.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
     }
 }

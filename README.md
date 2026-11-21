@@ -95,14 +95,10 @@ panel states where you are:
     ✓ Calendars   granted
     ! Reminders   not yet requested          [Grant…]
 
-  SAFETY
-    ☐ Read-only
-    ☑ Ask before deleting
-
-  CLIENT SETUP                               Re-check
+  CLIENT SETUP                            Check Again
     ✓ Claude Code       connected to this app
     ○ Claude Desktop    not set up
-        [Connect Claude Desktop]        Manual setup ▾
+        [Connect Claude Desktop]        Manual Setup ▾
 
   CONNECTED CLIENTS                                 1
     ● Claude Code                              pid 49823
@@ -112,12 +108,18 @@ panel states where you are:
     14:01:58  calendar_search_events        Claude Code
     14:01:40  — connected —                 Claude Code
 
-  DIAGNOSTICS
-    [Open Log]  [Copy Diagnostics]  [Refresh]
-    [Restart Bridge]  [Relaunch App]
-
-    ☐ Open MacBridge at login
+  [About MacBridge]  [Settings…]          [Quit MacBridge]
 ```
+
+**Settings** (⌘, or **Settings…**) has three tabs: **Safety** (Read-only, Ask before deleting),
+**General** (Open MacBridge at login, Show splash screen at launch) and **Diagnostics** (Open
+Log, Copy Diagnostics, Restart Bridge, Relaunch App). Opening MacBridge from Finder also opens
+Settings, so hiding the menu-bar icon never strands you.
+
+When you open MacBridge yourself, a short splash shows its card and then flies the icon into the
+menu bar, so it's clear where a menu-bar-only app went. It doesn't show when a client starts
+MacBridge in the background, only fades with Reduce Motion on, and can be switched off in
+Settings → General.
 
 If another copy of MacBridge is the one your clients point at, a warning appears at the top with its
 path — the failure that is otherwise invisible.
@@ -134,7 +136,7 @@ already correct isn't touched. For Claude Code it runs
 `claude mcp add --scope user`. **Manual setup** still copies the command or the JSON, for anyone
 who would rather make the change themselves.
 
-**Safety** controls what every connected client may do. **Read-only** refuses all changes, and
+**Safety** (in Settings) controls what every connected client may do. **Read-only** refuses all changes, and
 **Ask before deleting** (on by default) shows an alert before any event, reminder or list is
 deleted, and before a repeating event's repeat is changed, which removes the occurrences that no
 longer fit. Nobody answering within a minute counts as Don't Allow.
@@ -148,7 +150,7 @@ longer fit. Nobody answering within a minute counts as Don't Allow.
 | Claude Desktop | `~/Library/Logs/Claude/mcp-server-macbridge.log` | the shim's stderr plus full JSON-RPC traffic |
 | Claude Code | `~/Library/Caches/claude-cli-nodejs/<project>/mcp-logs-macbridge/` | the same, per project |
 
-The panel has **Open Log** and **Copy Diagnostics** — the latter puts version, bundle path, socket,
+Settings → Diagnostics has **Open Log** and **Copy Diagnostics** — the latter puts version, bundle path, socket,
 permissions, client setup, connection counts and the last 30 log lines on the clipboard in one
 block.
 
@@ -248,6 +250,9 @@ command-line tool's access to the app that launched it. The menu-bar panel shows
 - **Inviting people.** Attendees can be read but not added: EventKit has no way to send
   invitations.
 
+Planned additions, things left to check by hand, and what EventKit can't do are tracked in
+[ROADMAP.md](ROADMAP.md).
+
 ## Feedback
 
 Found a bug or have an idea? [Open an issue](https://github.com/todddube/macOSMCP/issues/new/choose).
@@ -286,9 +291,11 @@ and distribute, with no warranty. Every source file carries the copyright notice
 Requires macOS 14 or later. The delete confirmation now floats above whatever app you're in
 without taking the keyboard, has no default button (Escape cancels), and counts down to its
 deadline; while it waits, other tool calls keep working, and a second request queues behind it
-with its own deadline. A new **Settings** window (⌘, or **Settings…**) holds Safety, Launch at
-Login and Diagnostics, and opens when you open MacBridge from Finder, so hiding the menu-bar
-icon never strands you. The menu-bar icon is a template image when idle, so it follows the menu
+with its own deadline. A new **Settings** window (⌘, or **Settings…**) with toolbar tabs holds
+Safety, General and Diagnostics, and opens when you open MacBridge from Finder, so hiding the
+menu-bar icon never strands you. A launch splash shows the app's card and flies its icon into
+the menu bar; it is skipped when a client starts the app, respects Reduce Motion, and can be
+turned off in Settings. The menu-bar icon is a template image when idle, so it follows the menu
 bar's colors, with status dots drawn into it; the panel scrolls on small screens, uses no text
 below 10 points, and shows Claude Desktop's two connections as one client with 2 sessions. Every tool has a readable title for client UIs; the three destructive tools tell
 Claude Code to always ask; and the read tools publish an output schema. Client names are now

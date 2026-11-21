@@ -529,6 +529,12 @@ private final class Wire: @unchecked Sendable {
 /// Finds and launches the app bundle the running executable lives inside.
 public enum AppLauncher {
 
+    /// Set in the app's environment when a client starts it in the background, so the
+    /// app can tell that launch apart from one the user made (and skip the splash).
+    public static let launchedByEnvironmentKey = "MACBRIDGE_LAUNCHED_BY"
+    /// The ``launchedByEnvironmentKey`` value for a launch by a client's shim.
+    public static let launchedByClient = "client"
+
     /// The containing `.app`, for `macbridge doctor` to report.
     public static func containingAppBundleForDiagnostics() -> URL? {
         containingAppBundle()
@@ -549,8 +555,8 @@ public enum AppLauncher {
     /// Launch the containing app in the background.
     ///
     /// `open -g` so starting a conversation never steals focus from what the user
-    /// is doing, and `/usr/bin/open` rather than `NSWorkspace` to keep MacBridgeKit
-    /// free of AppKit.
+    /// is doing, `--env` so the app knows a client started it, and `/usr/bin/open`
+    /// rather than `NSWorkspace` to keep MacBridgeKit free of AppKit.
     static func launchContainingApp() async throws {
         guard let bundle = containingAppBundle() else {
             throw BridgeClient.ClientError.appUnavailable(
@@ -565,7 +571,7 @@ public enum AppLauncher {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-g", "-a", bundle.path]
+        process.arguments = ["-g", "--env", "\(launchedByEnvironmentKey)=\(launchedByClient)", "-a", bundle.path]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 

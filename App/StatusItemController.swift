@@ -45,7 +45,7 @@ final class StatusItemController: NSObject {
     /// Whether `window` is a menu-bar item's window: a status-level window about as
     /// tall as the menu bar. Public properties only. The panel is a much taller
     /// window, and no other window of ours sits at the status level.
-    private static func isStatusItemWindow(_ window: NSWindow) -> Bool {
+    static func isStatusItemWindow(_ window: NSWindow) -> Bool {
         window.level == .statusBar && window.frame.height <= 60
     }
 

@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             otherwise: { [self] in
                 model.start()
                 statusItem.start()
+                SplashScreen.showIfWanted()
             }
         )
     }

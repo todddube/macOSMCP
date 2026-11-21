@@ -290,8 +290,10 @@ App/                     the menu-bar app (Xcode target only)
   main.swift             entry point: app or CLI, decided by the arguments
   MacBridgeApp.swift     the MenuBarExtra scene and app delegate
   AppModel.swift         bridge lifecycle, permissions, access policy, client setup
-  MenuContent.swift      the panel: status, permissions, safety, clients, activity
-  ConfirmationPrompt.swift  the alert before a delete or a repeat change
+  MenuContent.swift      the panel: status, permissions, client setup, clients, activity
+  SettingsView.swift     Settings: Safety, General and Diagnostics tabs
+  SplashScreen.swift     the launch splash and its flight into the menu bar
+  ConfirmationPrompt.swift  the floating prompt before a delete or a repeat change
   ActivityLog.swift      recent calls, in memory only
   StatusItemController.swift  right-click menu and client status dots
   BridgeTraffic.swift    the live bridge drawing and traffic animation

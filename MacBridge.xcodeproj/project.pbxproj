@@ -25,6 +25,7 @@
 		6DA7E1ACA4220CB7A0863A3D /* ToolInventoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E280CB79D30268261DBDE8F2 /* ToolInventoryTests.swift */; };
 		7389540F0A9F1831117060C8 /* InstallLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D38C6B831BBBE75566E61EC /* InstallLocation.swift */; };
 		74FA26949C8CF8BBD28208DA /* VersionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F8E4CD1E00BBC0356FEE19 /* VersionTests.swift */; };
+		79B31D493E7634B6CEEA2EB7 /* SplashScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45F67B9D5078037F895AE070 /* SplashScreen.swift */; };
 		7B0CCDEF827574E71EBC3745 /* AboutWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9954D23E419C53E05D9635C /* AboutWindow.swift */; };
 		7C5D6893A02D575E40EF2610 /* ClientConfigWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFB8B91F7FA1C3D5EFCDC3E1 /* ClientConfigWriterTests.swift */; };
 		7D548523B82766DAA7F72AFA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2FA83CD15573E2DDC7E9649E /* Assets.xcassets */; };
@@ -62,6 +63,7 @@
 		2FA83CD15573E2DDC7E9649E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3696447F8DC93F896B873662 /* UpdateCheckTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckTests.swift; sourceTree = "<group>"; };
 		3E4E6FD2BB43463B7AECAC2E /* ClientSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientSetupTests.swift; sourceTree = "<group>"; };
+		45F67B9D5078037F895AE070 /* SplashScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreen.swift; sourceTree = "<group>"; };
 		500A2590E04999D01B05D6A7 /* THIRD_PARTY_NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD_PARTY_NOTICES.md; sourceTree = "<group>"; };
 		54509C7F2ADB53F3683EC52E /* ArgumentsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgumentsTests.swift; sourceTree = "<group>"; };
 		57EAC50A640CA3FE8FBCCA20 /* BridgeClientGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeClientGuardTests.swift; sourceTree = "<group>"; };
@@ -159,6 +161,7 @@
 				19154988827E1D08A5FF959F /* main.swift */,
 				90FE346036BC1626BACB813F /* MenuContent.swift */,
 				14786F9F7882E3A66D549509 /* SettingsView.swift */,
+				45F67B9D5078037F895AE070 /* SplashScreen.swift */,
 				90EEE13E77D450A622C439F2 /* StatusItemController.swift */,
 				D90E05D271BFD91DEE4F1B4B /* UpdatePrompt.swift */,
 			);
@@ -379,6 +382,7 @@
 				250B5E9B481DB4C6E8197A19 /* MacBridgeApp.swift in Sources */,
 				688298292770B378385050F1 /* MenuContent.swift in Sources */,
 				854D4C391E853EF24E95AF4A /* SettingsView.swift in Sources */,
+				79B31D493E7634B6CEEA2EB7 /* SplashScreen.swift in Sources */,
 				F31F903FB80FF98096FF5AB8 /* StatusItemController.swift in Sources */,
 				CE42F4ABF58C43F13664D72F /* UpdatePrompt.swift in Sources */,
 				09599BD39ECBF3995BC7776F /* main.swift in Sources */,
