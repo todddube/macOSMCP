@@ -32,7 +32,8 @@ struct MacBridgeApp: App {
                 settings: delegate.settings
             )
         } label: {
-            MenuBarLabel(model: delegate.model, log: delegate.model.log, traffic: delegate.model.traffic)
+            MenuBarLabel(model: delegate.model, log: delegate.model.log, traffic: delegate.model.traffic,
+                         menuBarClock: delegate.model.traffic.menuBar)
         }
         // .window rather than the default .menu: the panel shows permissions,
         // connected clients and a scrolling activity list, none of which belong in
@@ -98,7 +99,10 @@ struct MenuBarLabel: View {
     /// ObservableObject does not republish through its parent. The client dots
     /// depend on which clients are connected.
     @ObservedObject var log: ActivityLog
-    @ObservedObject var traffic: BridgeTraffic
+    /// Not observed: it ticks at 30 fps for the panel. ``menuBarClock`` is its
+    /// slower clock for this label.
+    let traffic: BridgeTraffic
+    @ObservedObject var menuBarClock: MenuBarClock
     /// Keys the image, so a light/dark switch re-renders the label: the idle icon is a
     /// colour image whose bridge is drawn in the bar's text colour, and nothing
     /// else redraws it while the bridge is quiet.

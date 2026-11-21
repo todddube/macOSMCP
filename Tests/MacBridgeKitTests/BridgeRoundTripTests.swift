@@ -45,6 +45,44 @@ struct BridgeRoundTripTests {
         }
     }
 
+    /// A raw connection to `socket` that sends nothing, as a stuck or hostile peer would.
+    private func rawConnection(to socket: URL) throws -> Int32 {
+        let fd = try SocketEndpoint.makeSocket()
+        var addr = try SocketEndpoint.address(for: socket.path)
+        let result = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        #expect(result == 0)
+        return fd
+    }
+
+    @Test("A connection that never sends a handshake is closed, and the server keeps serving")
+    func silentConnectionTimesOut() async throws {
+        try await withSocketFolder { socket in
+            let server = BridgeServer(registry: ToolRegistry(), socketURL: socket, handshakeTimeout: 0.3)
+            try server.start()
+            defer { server.stop() }
+
+            let silent = try rawConnection(to: socket)
+            defer { close(silent) }
+            // The server's close reaches us as end-of-file, well before this read's own 5 s timeout.
+            var timeout = timeval(tv_sec: 5, tv_usec: 0)
+            setsockopt(silent, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            let started = Date()
+            var byte: UInt8 = 0
+            #expect(Darwin.read(silent, &byte, 1) == 0)
+            #expect(Date().timeIntervalSince(started) < 3)
+
+            // A real client connecting afterwards, and idling past the timeout, is unaffected.
+            let client = try await BridgeClient.connect(clientName: "test", socketURL: socket, launchIfNeeded: false)
+            try await Task.sleep(for: .milliseconds(600))
+            #expect(await client.ping())
+            await client.disconnect()
+        }
+    }
+
     @Test("Stopping ends open connections, and the client reconnects to the next server")
     func restartDropsConnections() async throws {
         try await withSocketFolder { socket in

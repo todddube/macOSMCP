@@ -19,7 +19,10 @@ struct MenuContent: View {
     /// nested one does not republish through its parent, so watching only `model`
     /// would leave the activity list frozen.
     @ObservedObject var log: ActivityLog
-    @ObservedObject var traffic: BridgeTraffic
+    /// Not observed: it ticks 30 times a second while busy, and only
+    /// ``BridgeTrafficView`` draws from it. Observing it here re-ran this whole
+    /// panel every frame, open or closed, at about 40% CPU.
+    let traffic: BridgeTraffic
     let settings: SettingsOpener
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

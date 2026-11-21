@@ -11,6 +11,17 @@ import AppKit
 import MacBridgeKit
 import SwiftUI
 
+/// The menu-bar label's own clock, ticked by ``BridgeTraffic`` only when the icon has
+/// something new to show.
+///
+/// A separate object because `MenuBarLabel` must not observe `BridgeTraffic`, whose
+/// `now` changes 30 times a second for the panel.
+@MainActor
+final class MenuBarClock: ObservableObject {
+    @Published private(set) var frame = 0
+    func advance() { frame &+= 1 }
+}
+
 /// Tool calls drawn as cars crossing the bridge.
 ///
 /// The activity list says what happened; this says that something is happening,
@@ -22,7 +33,8 @@ import SwiftUI
 /// Any activity also sets the bridge busy for a while: cars keep zipping both ways
 /// for `linger` seconds after the last call or connection, so a working session
 /// looks alive between calls rather than flashing one car at a time. Those ambient
-/// cars sit under the real ones, which still show kind and failure.
+/// cars sit under the real ones, which still show kind and failure, and only the
+/// panel draws them; the menu bar shows real calls alone, at a lower frame rate.
 ///
 /// The clock only runs while the bridge is busy, so an idle app costs nothing: the
 /// menu bar then shows one still frame of the bridge with no cars.
@@ -54,9 +66,18 @@ final class BridgeTraffic: ObservableObject {
         var reduceMotion: Bool
     }
 
-    /// Bumped every frame while animating; observing it is what redraws the icon.
+    /// Bumped every frame while animating; observing it is what redraws the panel.
     @Published private(set) var now = Date()
-    @Published private(set) var isActive = false
+    /// Whether the clock is running. Not published: only the menu-bar image reads
+    /// it, and ``menuBar`` already redraws that whenever it flips.
+    private(set) var isActive = false
+
+    /// What the menu-bar label observes instead of this object. It ticks on one
+    /// frame in `menuBarDivisor`, and only while a real call or a ring is moving.
+    /// Each menu-bar frame costs far more than drawing it: AppKit re-renders the
+    /// status item for every menu bar (each display and Space), which at 30 fps
+    /// measured about 40% CPU.
+    let menuBar = MenuBarClock()
 
     private var packets: [Packet] = []
     private var pulseStart: Date?
@@ -67,13 +88,23 @@ final class BridgeTraffic: ObservableObject {
     private var lastActivity: Date?
     private var lastAmbient: Date = .distantPast
     private var ambientRightward = false
+    /// Ticks since launch, for picking every `menuBarDivisor`-th frame.
+    private var frameCount = 0
+    /// Whether the last tick had a real car or a ring, so the frame after the last
+    /// one leaves still reaches the menu bar.
+    private var menuBarWasMoving = false
 
     nonisolated static let travelTime: TimeInterval = 0.8
     nonisolated static let pulseTime: TimeInterval = 0.9
     /// Minimum gap between cars, so a burst reads as a convoy rather than one blob.
     private static let spacing: TimeInterval = 0.12
-    /// How long the bridge keeps busy traffic after the last activity.
-    private static let linger: TimeInterval = 10
+    /// How long the bridge keeps busy traffic after the last activity. Short: every
+    /// second of it is menu-bar frames, and a chatty client would otherwise keep the
+    /// icon animating without a break.
+    private static let linger: TimeInterval = 2
+    /// The menu bar draws every third panel frame, 10 fps: enough for a car to
+    /// visibly cross in `travelTime`.
+    private static let menuBarDivisor = 3
     /// How often an ambient car sets off while busy, and the most on the deck at
     /// once — enough to read as traffic without crowding out the real calls.
     private static let ambientInterval: TimeInterval = 0.3
@@ -121,11 +152,13 @@ final class BridgeTraffic: ObservableObject {
 
     private func run() {
         now = Date()
-        isActive = true
+        if !isActive { isActive = true }
+        menuBar.advance()
         guard timer == nil else { return }
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
+        timer.tolerance = 0.01
         // .common so the icon keeps moving while the menu is open and tracking.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -139,12 +172,30 @@ final class BridgeTraffic: ObservableObject {
         }
         spawnAmbient(at: date)
         now = date
+        frameCount += 1
 
         if packets.isEmpty && pulseStart == nil {
             timer?.invalidate()
             timer = nil
             isActive = false
+            // The last frame always reaches the menu bar, so it settles on the still bridge.
+            menuBar.advance()
+        } else {
+            let moving = menuBarIsMoving
+            // Every third frame while a real car crosses, and one as the last leaves,
+            // so the bar is redrawn without it.
+            if moving ? frameCount % Self.menuBarDivisor == 0 : menuBarWasMoving {
+                menuBar.advance()
+            }
+            menuBarWasMoving = moving
         }
+    }
+
+    /// Whether the menu bar has anything to animate: a real call crossing or the
+    /// node ringing. Ambient cars only animate the panel; in the menu bar they kept
+    /// the icon redrawing for the whole linger after every call.
+    private var menuBarIsMoving: Bool {
+        pulseStart != nil || packets.contains { !$0.ambient }
     }
 
     var isBusy: Bool {
@@ -185,7 +236,9 @@ final class BridgeTraffic: ObservableObject {
     ///   them all in the bar's one colour. The template is left for an installation
     ///   with no clients at all.
     func menuBarImage(alert: Bool, dots: [ClientHealth.Level]) -> NSImage {
-        let snapshot = snapshot
+        // Real calls only: ambient cars are for the panel, see `menuBarIsMoving`.
+        var snapshot = snapshot
+        snapshot.packets.removeAll(where: \.ambient)
         let needsColour = alert || isActive || dots.contains { $0 != .absent }
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
             guard let cg = NSGraphicsContext.current?.cgContext else { return false }

@@ -60,14 +60,20 @@ public final class BridgeServer: @unchecked Sendable {
     /// Signalled when the accept loop returns, so ``stop()`` can wait for it.
     private let acceptLoopExited = DispatchSemaphore(value: 0)
 
+    /// How long a new connection has to send its handshake line.
+    private let handshakeTimeout: TimeInterval
+
     /// Configures the server without touching the socket; call ``start()`` to listen.
-    /// Omitting `authorize` allows every call.
+    /// Omitting `authorize` allows every call. `handshakeTimeout` is how long a new
+    /// connection may take to send its handshake before it's closed.
     public init(
         registry: ToolRegistry,
         socketURL: URL,
         authorize: Authorizer? = nil,
-        observe: Observer? = nil
+        observe: Observer? = nil,
+        handshakeTimeout: TimeInterval = 10
     ) {
+        self.handshakeTimeout = handshakeTimeout
         self.registry = registry
         self.socketURL = socketURL
         self.authorize = authorize ?? { _, _ in nil }
@@ -123,7 +129,9 @@ public final class BridgeServer: @unchecked Sendable {
         // story, not housekeeping.
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
 
-        guard Darwin.listen(fd, 16) == 0 else {
+        // The system maximum: several clients often start together (Claude Desktop opens
+        // two at once), and a full backlog refuses the rest outright.
+        guard Darwin.listen(fd, SOMAXCONN) == 0 else {
             close(fd)
             throw SocketEndpoint.SocketError.syscall("listen", errno: errno)
         }
@@ -195,6 +203,8 @@ public final class BridgeServer: @unchecked Sendable {
 
     private func acceptLoop(_ listenFD: Int32) {
         defer { acceptLoopExited.signal() }
+        // Only touched on the accept queue.
+        var acceptStalled = false
         while isRunning {
             let fd = Darwin.accept(listenFD, nil, nil)
             guard isRunning else {
@@ -203,12 +213,32 @@ public final class BridgeServer: @unchecked Sendable {
                 return
             }
             guard fd >= 0 else {
-                if errno == EINTR { continue }
+                let error = errno
+                if error == EINTR { continue }
+                // Out of descriptors or buffers, or a client gave up mid-connect: all
+                // pass once something closes, so wait a moment and keep listening
+                // rather than leave the bridge dead until the user restarts it.
+                if error == ECONNABORTED { continue }
+                if [EMFILE, ENFILE, ENOBUFS, ENOMEM].contains(error) {
+                    // Logged once per stretch, not every retry: it can last as long as
+                    // the connected clients that hold the descriptors.
+                    if !acceptStalled {
+                        BridgeLog.warning("accept: \(String(cString: strerror(error))); retrying", category: .bridge)
+                        acceptStalled = true
+                    }
+                    usleep(100_000)
+                    continue
+                }
                 // A closed listening socket is the normal shutdown path, not a fault.
                 if isRunning {
-                    observe(.serverError("accept failed: \(String(cString: strerror(errno)))"))
+                    observe(.serverError("accept failed: \(String(cString: strerror(error)))"))
                 }
                 return
+            }
+
+            if acceptStalled {
+                BridgeLog.info("accepting connections again", category: .bridge)
+                acceptStalled = false
             }
 
             // Only this user's processes. The private folder and socket mode
@@ -254,17 +284,31 @@ public final class BridgeServer: @unchecked Sendable {
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         var identity: ClientIdentity?
 
+        // Each connection holds a thread while it reads, so one that never says
+        // hello would hold it for good. The shim sends its handshake at once. The
+        // read timeout covers silence; the deadline covers a trickle of bytes with
+        // no newline.
+        let handshakeDeadline = Date().addingTimeInterval(handshakeTimeout)
+
         do {
+            try Self.setReadTimeout(fd, seconds: handshakeTimeout)
             while let chunk = try SocketEndpoint.read(fd, into: &buffer) {
+                if identity == nil, Date() > handshakeDeadline {
+                    throw SocketEndpoint.SocketError.syscall("read", errno: EAGAIN)
+                }
                 for line in try framer.append(chunk) {
                     if identity == nil {
                         identity = try handleHandshake(line, fd: fd)
+                        // Connected clients idle between calls for as long as they like.
+                        try Self.setReadTimeout(fd, seconds: 0)
                         continue
                     }
                     guard let identity else { continue }
                     try handleRequest(line, fd: fd, identity: identity)
                 }
             }
+        } catch let error as SocketEndpoint.SocketError where identity == nil && BridgeClient.isTimeout(error) {
+            BridgeLog.info("closed a connection that sent no handshake", category: .bridge)
         } catch {
             if let identity {
                 observe(.call(identity, tool: "(connection)", ok: false, detail: error.localizedDescription))
@@ -280,6 +324,18 @@ public final class BridgeServer: @unchecked Sendable {
         if let identity {
             BridgeLog.info("client disconnected: \(identity.displayName)", category: .bridge)
             observe(.disconnected(identity))
+        }
+    }
+
+    /// `SO_RCVTIMEO` on `fd`; zero means wait forever.
+    ///
+    /// - Throws: `SocketError.syscall` if it can't be set, which ends the connection
+    ///   rather than leave a client to be cut off mid-session by a stale timeout.
+    private static func setReadTimeout(_ fd: Int32, seconds: TimeInterval) throws {
+        let whole = seconds.rounded(.down)
+        var timeout = timeval(tv_sec: Int(whole), tv_usec: Int32((seconds - whole) * 1_000_000))
+        guard setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            throw SocketEndpoint.SocketError.syscall("setsockopt", errno: errno)
         }
     }
 

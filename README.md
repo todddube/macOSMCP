@@ -336,7 +336,11 @@ worked out by MacBridge from the process tree rather than taken on the client's 
 details that could contain titles no longer reach the log. `find_available_times` caps its range
 like search does, and a non-text `due` is refused instead of clearing the date. The app icon is a
 layered Icon Composer icon that adapts to dark, tinted and clear appearances. About and
-`macbridge --version` show the release date.
+`macbridge --version` show the release date. The menu-bar animation is far lighter: one call used to keep the app at
+about 44% CPU for 11 seconds, and now costs about a second (a call every 3 seconds averages
+about 5%; idle is 0%), because the icon animates real calls only, at 10 fps, and the panel no
+longer redraws while closed. The bridge keeps listening if it runs short of file descriptors,
+accepts a burst of connections at once, and closes a connection that never sends its handshake.
 
 **1.8.0** — Open-source release, one-click setup, and safer edits.
 Released under the MIT License, with a copyright notice in every source file. Added

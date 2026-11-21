@@ -100,6 +100,24 @@ Sources: [EventKit](https://developer.apple.com/documentation/eventkit),
 [MCP 2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
 [swift-sdk PR #314](https://github.com/modelcontextprotocol/swift-sdk/pull/314).
 
+## Performance (measured 2026-11-21)
+
+Load-tested against the installed app, Release build, on this Mac:
+
+| Scenario | Result |
+|---|---|
+| Idle, 60 s | 0.0% CPU, 1 wakeup, 22 MB, 6 threads |
+| One tool call | ~1 s of light CPU, then 0% (was ~44% for 11 s) |
+| One call every 3 s (a busy chat) | 5.6% average (was ~44%) |
+| 1 client × 50 calls | 29 calls/s, p50 34 ms, p95 55 ms |
+| 8 clients × 100 calls | 93 calls/s, p50 ~60 ms, p95 ~165 ms, ~70% CPU, 85 MB, no errors |
+| 60 clients connected at once | no errors, 71 threads |
+| 320 raw connections | all accepted, files back to baseline after close |
+| 100 silent connections | all closed after 10 s |
+
+Memory settles around 85 MB once EventKit has loaded, with no growth across runs. Sustained
+load CPU is EventKit's own query work; nothing real uses 90 calls a second.
+
 ## Deferred work
 
 | Item | Why it waited | When to pick it up |
@@ -109,7 +127,7 @@ Sources: [EventKit](https://developer.apple.com/documentation/eventkit),
 | **MCP spec 2026-07-28** | swift-sdk 0.12.1 (the latest) doesn't support it yet; Claude Desktop negotiates 2025-11-25. | When swift-sdk 0.13 or later ships (watch modelcontextprotocol/swift-sdk PR #314). |
 | **Confirm through the client (elicitation)** rather than MacBridge's own popup | Claude Desktop doesn't support it reliably yet. | Once the main clients support it; keep the popup as the fallback. |
 | **Claude Desktop extension (.mcpb) / MCP registry listing** | Optional. A bundled extension fits poorly with an app that has to be installed and granted permissions. | If installing it gets in the way for new users. |
-| **Per-connection threads** | GCD gives each connection a thread and caps at about 64. That's fine for a handful of clients. | If many clients connect at once, or when moving the server to Swift concurrency. |
+| **Per-connection threads** | Each connection holds a thread while connected. Measured 2026-11-21: 320 concurrent connections ran fine (325 threads, 71 MB, no fd leak), and silent connections are now closed after 10 s. Fine for real use. | If many clients connect at once, or when moving the server to Swift concurrency. |
 | **README screenshot** | Needs a screen capture of the panel, which wasn't possible this release. | Any time; light and dark versions together. |
 
 ## Housekeeping
