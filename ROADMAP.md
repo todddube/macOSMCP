@@ -68,7 +68,7 @@ EventKit APIs were added in macOS 26 or 27, so everything below works from macOS
 | # | Addition | Effort | Notes |
 |---|---|---|---|
 | 1 | ✅ **Prompts** (done): `plan-my-week`, `daily-agenda`, `review-overdue` | Low | Show as slash commands in Claude Code. FradSer's server has four; MacBridge has none. |
-| 2 | **Resources**: `macbridge://agenda/today`, `…/week`, `…/overdue`, one per reminder list | Low | Read-only views a client can attach as context (@-mention in Claude Code). None of the other servers have them. |
+| 2 | ✅ **Resources** (done; per-list via a URI template): `macbridge://agenda/today`, `…/week`, `…/overdue`, one per reminder list | Low | Read-only views a client can attach as context (@-mention in Claude Code). None of the other servers have them. |
 | 3 | **Richer repeats and alerts**: weekdays ("every Mon/Wed"), nth weekday ("2nd Tuesday"), several alerts, per-event time zone | Medium | All public EventKit (`EKRecurrenceRule` with `daysOfTheWeek`/`setPositions`, `addAlarm`, `EKEvent.timeZone`). MacBridge already *reads* these; it can't write them. Other servers treat them as read-only too. |
 | 4 | **Reminder start date and location reminders** ("remind me when I get home") | Medium | `startDateComponents`; `EKAlarm.structuredLocation` + `proximity`. Location needs a place name turned into coordinates. |
 | 5 | **Completed reminders by date** ("what did I finish this week?") | Low | `predicateForCompletedReminders(withCompletionDateStarting:ending:calendars:)`. Today `include_completed` has no date window. |

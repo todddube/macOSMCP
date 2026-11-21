@@ -68,6 +68,21 @@ which tools to call and how to lay out the answer; every argument is optional.
 Prompts only read until you answer. The changes they suggest go through the same Read-only and
 Ask before deleting settings as any other call, and none of them deletes anything.
 
+### Resources
+
+Read-only views a client can attach as context: an @-mention in Claude Code
+(`@macbridge:macbridge://agenda/today`), the attachment menu in Claude Desktop. Each is JSON
+gathered from the read tools, so it gets the same access checks and shows in Recent Activity.
+
+| URI | Contents |
+|---|---|
+| `macbridge://agenda/today` | today's events, reminders due today, and overdue reminders |
+| `macbridge://agenda/week` | events and reminders due over the seven days starting today |
+| `macbridge://reminders/overdue` | every overdue reminder, on every list |
+| `macbridge://reminders/list/{list_id}` | one list's incomplete reminders; ids come from `reminders_list_lists` |
+
+Listing resources reads nothing, so connecting a client never asks for Reminders access.
+
 ## Install
 
 You don't need to build anything. Requires **macOS 14 or later**.
@@ -314,7 +329,8 @@ turned off in Settings. The menu-bar icon follows the menu bar's colors, with a 
 client: green when connected or ready, yellow when something needs a look (Calendar or Reminders
 not granted, or the last call failed), red when calls can't work; the panel scrolls on small screens, uses no text
 below 10 points, and shows Claude Desktop's two connections as one client with 2 sessions. Three MCP prompts (`daily-agenda`, `plan-my-week`, `review-overdue`) show up as slash
-commands in Claude Code. Every tool has a readable title for client UIs; the three destructive tools tell
+commands in Claude Code, and four resources (`macbridge://agenda/today`, `…/agenda/week`,
+`…/reminders/overdue`, one per list) can be attached as context. Every tool has a readable title for client UIs; the three destructive tools tell
 Claude Code to always ask; and the read tools publish an output schema. Client names are now
 worked out by MacBridge from the process tree rather than taken on the client's word, and error
 details that could contain titles no longer reach the log. `find_available_times` caps its range

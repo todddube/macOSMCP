@@ -197,8 +197,45 @@ func runMCPServer(backend: ToolBackend) async throws {
         name: MacBridge.serverName,
         version: MacBridge.version,
         instructions: MacBridge.instructions,
-        capabilities: .init(prompts: .init(listChanged: false), tools: .init(listChanged: false))
+        capabilities: .init(
+            prompts: .init(listChanged: false),
+            resources: .init(subscribe: false, listChanged: false),
+            tools: .init(listChanged: false)
+        )
     )
+
+    // Resources are read by running the read tools through `backend`, so they get
+    // the bridge's access checks and activity log without anything new in the app.
+    let callTool: ResourceCatalog.CallTool = { try await backend.callTool($0, arguments: $1) }
+
+    await server.withMethodHandler(ListResources.self) { _ in
+        ListResources.Result(resources: ResourceCatalog.resources)
+    }
+
+    await server.withMethodHandler(ListResourceTemplates.self) { _ in
+        ListResourceTemplates.Result(templates: ResourceCatalog.templates)
+    }
+
+    await server.withMethodHandler(ReadResource.self) { params in
+        do {
+            return ReadResource.Result(contents: [try await ResourceCatalog.read(params.uri, call: callTool)])
+        } catch let error as ResourceCatalog.ResourceError {
+            throw MCPError.serverError(code: ResourceCatalog.ResourceError.code,
+                                       message: error.errorDescription ?? "Resource not found")
+        } catch {
+            // The client and stderr get the message, which can echo list names; the
+            // persisted log gets the redacted form, as for a failed tool call.
+            let message = (error as? MacBridgeError)?.errorDescription
+                ?? (error as? BridgeClient.ClientError)?.errorDescription
+                ?? error.localizedDescription
+            let logged = (error as? MacBridgeError)?.logDescription
+                ?? (error as? BridgeClient.ClientError)?.logDescription
+                ?? "details withheld from the log"
+            log("reading \(params.uri) failed: \(message)", isError: true,
+                persisted: "reading a resource failed: \(logged)")
+            throw MCPError.internalError(message)
+        }
+    }
 
     // Prompts are fixed text, so they are answered here rather than by the app:
     // they work before the app is running, and the calls they lead to go through

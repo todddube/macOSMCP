@@ -311,6 +311,7 @@ Sources/
     Setup/               client config detection, Connect and Disconnect, client naming
     Tools/               tool definitions, JSON schemas, ToolRegistry
     Prompts/             the MCP prompts (daily-agenda, plan-my-week, review-overdue)
+    Resources/           the MCP resources (agenda, overdue, per-list), read via the tools
     Support/             dates, arguments, errors, logging, credits, update check
   macbridge/             the CLI: mcp, doctor, tools, and the direct and bridged backends
 Tests/MacBridgeKitTests/ swift-testing suites, including the opt-in live ones
