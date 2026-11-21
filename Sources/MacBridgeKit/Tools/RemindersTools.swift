@@ -76,6 +76,9 @@ enum RemindersTools {
                         "recurrence_interval": Schema.integer("Repeat every N periods.", default: 1, minimum: 1),
                         "recurrence_count": Schema.integer("Stop after this many occurrences.", minimum: 1),
                         "recurrence_until": Schema.string("Stop repeating after this date. \(Schema.dateFormats)"),
+                        "recurrence_days": Schema.recurrenceDays,
+                        "recurrence_position": Schema.recurrencePosition,
+                        "recurrence_month_days": Schema.recurrenceMonthDays,
                     ],
                     required: ["title"]
                 ),
@@ -107,6 +110,9 @@ enum RemindersTools {
                         "recurrence_interval": Schema.integer("Repeat every N periods; the rest of the repeat is kept.", minimum: 1),
                         "recurrence_count": Schema.integer("End the repeat after this many occurrences; null repeats forever.", minimum: 1),
                         "recurrence_until": Schema.string("End the repeat on this date; null repeats forever. \(Schema.dateFormats)"),
+                        "recurrence_days": Schema.recurrenceDays,
+                        "recurrence_position": Schema.recurrencePosition,
+                        "recurrence_month_days": Schema.recurrenceMonthDays,
                     ],
                     required: ["reminder_id"]
                 ),

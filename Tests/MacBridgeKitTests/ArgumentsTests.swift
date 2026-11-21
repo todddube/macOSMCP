@@ -226,6 +226,78 @@ struct URLArgumentTests {
     }
 }
 
+/// Lists that may be cleared, and time zone identifiers.
+@Suite("List and time zone arguments")
+struct ListAndTimeZoneArgumentTests {
+
+    @Test("String lists: absent is nil; null, \"\" and [] clear; a bare string is one item")
+    func stringLists() throws {
+        #expect(try Arguments([:]).clearableStringList("k") == nil)
+        #expect(try Arguments(["k": .null]).clearableStringList("k") == [])
+        #expect(try Arguments(["k": ""]).clearableStringList("k") == [])
+        #expect(try Arguments(["k": []]).clearableStringList("k") == [])
+        #expect(try Arguments(["k": " mon "]).clearableStringList("k") == ["mon"])
+        #expect(try Arguments(["k": ["mon", " tue"]]).clearableStringList("k") == ["mon", "tue"])
+    }
+
+    @Test("String lists refuse non-strings and blank items")
+    func stringListErrors() {
+        #expect(throws: MacBridgeError.self) { try Arguments(["k": [1]]).clearableStringList("k") }
+        #expect(throws: MacBridgeError.self) { try Arguments(["k": ["mon", ""]]).clearableStringList("k") }
+        #expect(throws: MacBridgeError.self) { try Arguments(["k": true]).clearableStringList("k") }
+    }
+
+    @Test("Integer lists: numbers, numeric strings and a bare number; null and [] clear")
+    func intLists() throws {
+        #expect(try Arguments([:]).clearableIntList("k") == nil)
+        #expect(try Arguments(["k": .null]).clearableIntList("k") == [])
+        #expect(try Arguments(["k": []]).clearableIntList("k") == [])
+        #expect(try Arguments(["k": ""]).clearableIntList("k") == [])
+        #expect(try Arguments(["k": 10]).clearableIntList("k") == [10])
+        #expect(try Arguments(["k": [10, "60", .double(5)]]).clearableIntList("k") == [10, 60, 5])
+    }
+
+    @Test("Integer lists refuse words, booleans and huge numbers")
+    func intListErrors() {
+        #expect(throws: MacBridgeError.self) { try Arguments(["k": ["ten"]]).clearableIntList("k") }
+        #expect(throws: MacBridgeError.self) { try Arguments(["k": [true]]).clearableIntList("k") }
+        #expect(throws: MacBridgeError.self) { try Arguments(["k": [.double(1e30)]]).clearableIntList("k") }
+    }
+
+    @Test("Time zones: IANA identifiers in any case, plus UTC and GMT")
+    func timeZones() throws {
+        #expect(try Arguments(["tz": "America/New_York"]).optionalTimeZone("tz")?.identifier == "America/New_York")
+        #expect(try Arguments(["tz": "europe/london"]).optionalTimeZone("tz")?.identifier == "Europe/London")
+        #expect(try Arguments(["tz": "UTC"]).optionalTimeZone("tz")?.secondsFromGMT() == 0)
+        #expect(try Arguments(["tz": "gmt"]).optionalTimeZone("tz")?.secondsFromGMT() == 0)
+        #expect(try Arguments([:]).optionalTimeZone("tz") == nil)
+    }
+
+    @Test("Unknown zones, abbreviations, offsets and blanks are refused with the format", arguments: [
+        Value.string("Mars/Olympus_Mons"), "EST", "PST", "+05:00", "New York", "", .null, 5,
+    ])
+    func badTimeZones(value: Value) {
+        do {
+            _ = try Arguments(["time_zone": value]).optionalTimeZone("time_zone")
+            Issue.record("\(value) should be refused")
+        } catch MacBridgeError.invalidArgument(let name, let reason) {
+            #expect(name == "time_zone")
+            #expect(reason.contains("America/New_York"))
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+    }
+
+    @Test("Dates read a time without an offset in the zone given")
+    func zonedDates() throws {
+        let newYork = try #require(TimeZone(identifier: "America/New_York"))
+        let args = Arguments(["start": "2026-07-01T09:00:00", "fixed": "2026-07-01T09:00:00Z"])
+        let zoned = try #require(try args.optionalDate("start", timeZone: newYork))
+        #expect(zoned.date == DateParsing.parse("2026-07-01T13:00:00Z")?.date)
+        #expect(try args.requiredDate("fixed", timeZone: newYork).date == DateParsing.parse("2026-07-01T09:00:00Z")?.date)
+    }
+}
+
 /// A failed lookup points the model at the tool that lists valid values.
 @Suite("Not-found hints")
 struct NotFoundHintTests {

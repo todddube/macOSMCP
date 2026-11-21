@@ -64,13 +64,22 @@ public struct DateParsing {
     /// `+1m` is refused rather than guessed: a model writes it for minutes about as
     /// often as for months.
     ///
+    /// - Parameter timeZone: the zone a date-time without `Z` or an offset is
+    ///   wall-clock time in; nil for the Mac's own. It applies only to such
+    ///   floating date-times: an explicit offset is honoured as given, a date-only
+    ///   value stays the Mac's day (all-day items have no zone), and relative values
+    ///   count from `now`.
     /// - Returns: the parsed instant, and whether the input carried a time.
-    public static func parse(_ raw: String, now: Date = Date()) -> (date: Date, hasTime: Bool)? {
+    public static func parse(
+        _ raw: String,
+        now: Date = Date(),
+        timeZone: TimeZone? = nil
+    ) -> (date: Date, hasTime: Bool)? {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
 
         if let relative = parseRelative(s, now: now) { return relative }
-        return parseAbsolute(s)
+        return parseAbsolute(s, floatingIn: timeZone)
     }
 
     /// `2026-09-28`, or a date-time in any of the shapes models emit: with or
@@ -79,7 +88,7 @@ public struct DateParsing {
         ^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?(Z|[+-]\d{2}(?::?\d{2})?)?)?$
         """#, options: [.caseInsensitive])
 
-    private static func parseAbsolute(_ s: String) -> (date: Date, hasTime: Bool)? {
+    private static func parseAbsolute(_ s: String, floatingIn floatingZone: TimeZone?) -> (date: Date, hasTime: Bool)? {
         let range = NSRange(s.startIndex..., in: s)
         guard let match = absolutePattern.firstMatch(in: s, range: range) else { return nil }
 
@@ -99,6 +108,9 @@ public struct DateParsing {
         if let zone = group(7) {
             guard let tz = timeZone(fromDesignator: zone) else { return nil }
             calendar.timeZone = tz
+        } else if hasTime, let floatingZone {
+            // Wall-clock time in the zone the caller named, such as an event's own.
+            calendar.timeZone = floatingZone
         } else {
             // A bare date-time is local wall time. A date-only value must be too:
             // read as UTC midnight it lands on the previous day west of Greenwich.
@@ -184,6 +196,20 @@ public struct DateParsing {
     /// Format for output: date-only when `allDay`, otherwise offset date-time.
     public static func format(_ date: Date, allDay: Bool) -> String {
         allDay ? dateOnly.string(from: date) : offsetDateTime.string(from: date)
+    }
+
+    /// The instant showing the same wall-clock time in `new` as `date` shows in
+    /// `old`: 09:00 in Los Angeles becomes 09:00 in New York. A time that doesn't
+    /// exist in `new` (inside a daylight-saving gap) moves forward past the gap.
+    public static func reanchor(_ date: Date, from old: TimeZone, to new: TimeZone) -> Date {
+        var source = Calendar(identifier: .gregorian)
+        source.timeZone = old
+        var target = Calendar(identifier: .gregorian)
+        target.timeZone = new
+        let wallClock = source.dateComponents(
+            [.era, .year, .month, .day, .hour, .minute, .second, .nanosecond], from: date
+        )
+        return target.date(from: wallClock) ?? date
     }
 
     /// End of the calendar day containing `date`, used to make an inclusive range.

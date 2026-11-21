@@ -149,6 +149,57 @@ struct DateParsingTests {
         #expect(DateParsing.format(date, allDay: false).contains("T"))
     }
 
+    // MARK: Time zones
+
+    private let newYork = TimeZone(identifier: "America/New_York")!
+    private let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+
+    @Test("A floating time is wall-clock time in the zone given")
+    func floatingInZone() throws {
+        let nine = try #require(DateParsing.parse("2026-07-01T09:00", timeZone: newYork))
+        #expect(nine.hasTime)
+        #expect(nine.date == DateParsing.parse("2026-07-01T13:00:00Z")?.date, "09:00 EDT is 13:00 UTC")
+        // Standard time in winter, so the zone is a real zone, not a fixed offset.
+        let winter = try #require(DateParsing.parse("2026-01-15 09:00:00", timeZone: newYork))
+        #expect(winter.date == DateParsing.parse("2026-01-15T14:00:00Z")?.date)
+    }
+
+    @Test("An explicit offset or Z is honoured whatever the zone")
+    func explicitOffsetWins() throws {
+        let utc = try #require(DateParsing.parse("2026-07-01T09:00:00Z", timeZone: tokyo))
+        #expect(utc.date == DateParsing.parse("2026-07-01T09:00:00Z")?.date)
+        let offset = try #require(DateParsing.parse("2026-07-01T09:00:00-07:00", timeZone: tokyo))
+        #expect(offset.date == DateParsing.parse("2026-07-01T16:00:00Z")?.date)
+    }
+
+    @Test("Date-only and relative values ignore the zone")
+    func zoneLeavesOthersAlone() throws {
+        #expect(DateParsing.parse("2026-07-01", timeZone: tokyo)?.date == DateParsing.parse("2026-07-01")?.date)
+        let now = try #require(DateParsing.parse("2026-09-28T13:00:00")).date
+        #expect(DateParsing.parse("+2h", now: now, timeZone: tokyo)?.date == now.addingTimeInterval(7200))
+        #expect(DateParsing.parse("tomorrow", now: now, timeZone: tokyo)?.date
+            == DateParsing.parse("tomorrow", now: now)?.date)
+        #expect(DateParsing.parse("now", now: now, timeZone: tokyo)?.date == now)
+    }
+
+    @Test("No zone keeps the Mac's, as before")
+    func nilZoneIsLocal() {
+        #expect(DateParsing.parse("2026-09-28T15:30:00", timeZone: nil)?.date
+            == DateParsing.parse("2026-09-28T15:30:00")?.date)
+    }
+
+    @Test("Re-anchoring keeps the wall-clock time in the new zone")
+    func reanchor() throws {
+        let la = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        let nineLA = try #require(DateParsing.parse("2026-07-01T09:00:00-07:00")).date
+        let moved = DateParsing.reanchor(nineLA, from: la, to: newYork)
+        #expect(moved == DateParsing.parse("2026-07-01T09:00:00-04:00")?.date)
+        #expect(DateParsing.reanchor(nineLA, from: la, to: la) == nineLA)
+        // Across the date line the day is kept too.
+        let lateLA = try #require(DateParsing.parse("2026-07-01T23:30:00-07:00")).date
+        #expect(DateParsing.reanchor(lateLA, from: la, to: tokyo) == DateParsing.parse("2026-07-01T23:30:00+09:00")?.date)
+    }
+
     @Test("endOfDay lands on the same day, last second")
     func endOfDay() throws {
         let date = try #require(DateParsing.parse("2026-09-28")).date

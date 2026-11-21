@@ -39,7 +39,8 @@ near-identical tools.
 
 Dates accept `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM[:SS]`, full ISO-8601, or relative values: `today`,
 `tomorrow`, `now`, `+7d`, `-3d`, `+2w`, `+1mo`, `+2h`, `+30min`. Output is always one canonical form, so a client never has
-to guess. Times are in the Mac's local time zone.
+to guess. Times are in the Mac's local time zone, unless an event is given a `time_zone` (an IANA
+name such as `America/New_York`): its times without an offset are then wall-clock times there.
 
 `calendar_find_available_times` exists so a model proposing a meeting slot does not have to read
 events and reason about the gaps itself. Events marked *free* and cancelled events do not block;
@@ -50,8 +51,14 @@ events on subscribed calendars still do. The result says what was left out.
 Search results stay short: each event says how it repeats and, for an invitation, how you
 replied. Pass `event_id` to `calendar_search_events` for one event in full: who is invited and
 how each replied, its alerts, and whether it shows as busy. Pass `include_details` to get that
-for every event. `calendar_update_event` changes alerts, availability and how an event repeats;
-`reminders_update_reminder` changes how a reminder repeats.
+for every event. `calendar_update_event` changes alerts, availability, time zone and how an event
+repeats; `reminders_update_reminder` changes how a reminder repeats.
+
+Repeats can fall on chosen weekdays (`recurrence_days: ["mon", "wed", "fri"]`), on the nth
+weekday of a month or year (`"2nd tuesday"`, `"last friday"`), on a position among weekdays
+(days Monday to Friday with `recurrence_position: -1` is the last weekday of the month), or on
+days of the month (`recurrence_month_days: [15, -1]`). Events take up to five alerts with
+`alarms_minutes_before`; changing them keeps alerts at a fixed time or place.
 
 ### Prompts
 
@@ -341,6 +348,9 @@ about 44% CPU for 11 seconds, and now costs about a second (a call every 3 secon
 about 5%; idle is 0%), because the icon animates real calls only, at 10 fps, and the panel no
 longer redraws while closed. The bridge keeps listening if it runs short of file descriptors,
 accepts a burst of connections at once, and closes a connection that never sends its handshake.
+Events and reminders can now be written with richer repeats (chosen weekdays, "2nd Tuesday",
+"last weekday of the month", days of the month), and events with several alerts and their own
+time zone.
 
 **1.8.0** — Open-source release, one-click setup, and safer edits.
 Released under the MIT License, with a copyright notice in every source file. Added

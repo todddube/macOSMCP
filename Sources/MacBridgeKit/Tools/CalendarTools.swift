@@ -26,6 +26,11 @@ enum CalendarTools {
             + "calendar_search_events returned it. Required for a repeating event unless span is all_events."
     )
 
+    static let timeZoneParameter = Schema.string(
+        "IANA time zone for a timed event, e.g. America/New_York. start and end without an offset are "
+            + "wall-clock times there; an offset or Z is taken as given. Ignored for all-day events."
+    )
+
     static let availabilityParameter = Schema.string(
         "Whether the event shows as busy to people checking the user's free time.",
         options: ["busy", "free", "tentative", "unavailable"]
@@ -87,12 +92,21 @@ enum CalendarTools {
                         "location": Schema.string("Where the event takes place."),
                         "notes": Schema.string("Free-text notes on the event."),
                         "url": Schema.string("A URL to attach, such as a meeting link."),
-                        "alarm_minutes_before": Schema.integer("Add an alert this many minutes before the start.", minimum: 0),
+                        "time_zone": timeZoneParameter,
+                        "alarm_minutes_before": Schema.integer("Add an alert this many minutes before the start. For several, use alarms_minutes_before instead.", minimum: 0),
+                        "alarms_minutes_before": Schema.array(
+                            "Alerts, each this many minutes before the start, e.g. [10, 60]; at most 5. "
+                                + "[] means no alerts, not even Calendar's default one.",
+                            items: .object(["type": .string("integer"), "minimum": .int(0)])
+                        ),
                         "availability": availabilityParameter,
                         "recurrence": Schema.string("Repeat frequency.", options: ["daily", "weekly", "monthly", "yearly", "none"]),
                         "recurrence_interval": Schema.integer("Repeat every N periods, e.g. 2 with weekly means fortnightly.", default: 1, minimum: 1),
                         "recurrence_count": Schema.integer("Stop after this many occurrences.", minimum: 1),
                         "recurrence_until": Schema.string("Stop repeating after this date. \(Schema.dateFormats)"),
+                        "recurrence_days": Schema.recurrenceDays,
+                        "recurrence_position": Schema.recurrencePosition,
+                        "recurrence_month_days": Schema.recurrenceMonthDays,
                     ],
                     required: ["title", "start"]
                 ),
@@ -117,10 +131,20 @@ enum CalendarTools {
                         "location": Schema.string("A new location; empty string clears it."),
                         "notes": Schema.string("New notes; empty string clears them."),
                         "url": Schema.string("A new URL; empty string clears it."),
+                        "time_zone": Schema.string(
+                            "Move a timed event to this IANA time zone, e.g. America/New_York, keeping its wall-clock "
+                                + "times (9:00 stays 9:00 there). start and end without an offset are read in it. "
+                                + "Ignored for all-day events."
+                        ),
                         "availability": availabilityParameter,
                         "alarm_minutes_before": Schema.integer(
                             "Replace the event's alerts before the start with one this many minutes before; null removes them.",
                             minimum: 0
+                        ),
+                        "alarms_minutes_before": Schema.array(
+                            "Replace the event's alerts before the start with these, e.g. [10, 60]; at most 5. Null or [] "
+                                + "removes them. Alerts at a fixed time or place are kept. Not with alarm_minutes_before.",
+                            items: .object(["type": .string("integer"), "minimum": .int(0)])
                         ),
                         "recurrence": Schema.string(
                             "Make the event repeat, change how often, or stop it with none. Removes occurrences that no "
@@ -130,6 +154,9 @@ enum CalendarTools {
                         "recurrence_interval": Schema.integer("Repeat every N periods; the rest of the repeat is kept.", minimum: 1),
                         "recurrence_count": Schema.integer("End the repeat after this many occurrences; null repeats forever.", minimum: 1),
                         "recurrence_until": Schema.string("End the repeat on this date; null repeats forever. \(Schema.dateFormats)"),
+                        "recurrence_days": Schema.recurrenceDays,
+                        "recurrence_position": Schema.recurrencePosition,
+                        "recurrence_month_days": Schema.recurrenceMonthDays,
                         "occurrence_date": occurrenceParameter,
                         "span": Schema.string(
                             "For a repeating event: this occurrence only, this and all later ones, or the whole series "

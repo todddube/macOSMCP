@@ -230,7 +230,7 @@ public actor RemindersService {
         if let notes = args.optionalString("notes") { reminder.notes = notes }
         if let url = try args.optionalURL("url") { reminder.url = url }
         if let priority = try ReminderMapping.parsePriority(args) { reminder.priority = priority }
-        if let rule = try Recurrence.rule(from: args) {
+        if let rule = try Recurrence.rule(from: args, start: dueDate(reminder)) {
             try requireDueForRepeat(reminder)
             reminder.addRecurrenceRule(rule)
         }
@@ -294,7 +294,7 @@ public actor RemindersService {
 
         // Unlike an event's, a reminder's repeat removes nothing: the next one is
         // only made when this one is completed.
-        switch try Recurrence.change(from: args, existing: reminder.recurrenceRules?.first) {
+        switch try Recurrence.change(from: args, existing: reminder.recurrenceRules?.first, start: dueDate(reminder)) {
         case .remove:
             for rule in reminder.recurrenceRules ?? [] { reminder.removeRecurrenceRule(rule) }
         case .set(let rule):

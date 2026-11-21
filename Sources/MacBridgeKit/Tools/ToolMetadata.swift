@@ -184,7 +184,7 @@ enum ToolMetadata {
             "organizer_is_me": Schema.boolean("True when the user organized it, with details."),
             "attendees": Schema.array("Who is invited, with details.", items: .object(["type": .string("object")])),
             "alarms": Schema.array("The event's alerts, with details.", items: .object(["type": .string("object")])),
-            "time_zone": Schema.string("The event's time zone, with details."),
+            "time_zone": Schema.string("The event's time zone: with details, or whenever it isn't the Mac's."),
         ],
         required: ["id", "title", "all_day"]
     )

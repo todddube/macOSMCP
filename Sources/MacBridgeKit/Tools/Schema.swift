@@ -100,4 +100,28 @@ public enum Schema {
     public static let dateFormats =
         "Accepts YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS] (local time), a full ISO-8601 timestamp, "
         + "or a relative value: today, tomorrow, yesterday, now, +7d, -3d, +2w, +1mo, +2h, +30min."
+
+    /// `recurrence_days`, shared by the event and reminder create and update tools.
+    static let recurrenceDays = array(
+        "Days the repeat falls on: monday…sunday or mon…sun. Weekly: plain days, e.g. [\"mon\", \"wed\", \"fri\"]. "
+            + "Monthly or yearly: may take an ordinal, 1st to 5th, last or second-to-last, e.g. "
+            + "[\"2nd tuesday\"] or [\"last fri\"]; a yearly one falls in the start's month. Not for daily "
+            + "(use weekly). Choose a start that matches. Replaces recurrence_month_days; null or [] clears.",
+        items: .object(["type": .string("string")])
+    )
+
+    /// `recurrence_position`, shared like ``recurrenceDays``.
+    static let recurrencePosition = integer(
+        "Monthly or yearly with plain recurrence_days: which matching day in the period, 1 to 5, or -1 "
+            + "(last) to -5. Days mon–fri with -1 is the last weekday of the month. Null clears.",
+        minimum: -5,
+        maximum: 5
+    )
+
+    /// `recurrence_month_days`, shared like ``recurrenceDays``.
+    static let recurrenceMonthDays = array(
+        "Monthly only: days of the month, 1 to 31, or -1 (last day) to -31, e.g. [15, -1] for the 15th "
+            + "and the last day. Choose a start that matches. Replaces recurrence_days; null or [] clears.",
+        items: .object(["type": .string("integer")])
+    )
 }

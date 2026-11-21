@@ -61,6 +61,11 @@ enum CalendarMapping {
         if let end = event.endDate {
             out["end"] = .string(DateParsing.format(end, allDay: event.isAllDay))
         }
+        // Start and end are in the Mac's offset; an event kept in another zone says
+        // so, or "09:00 New York" would read as an unexplained 06:00.
+        if let zone = event.timeZone, !event.isAllDay, zone.identifier != TimeZone.current.identifier {
+            out["time_zone"] = .string(zone.identifier)
+        }
         if let cal = event.calendar {
             out["calendar"] = .string(cal.title)
             out["calendar_id"] = .string(cal.calendarIdentifier)

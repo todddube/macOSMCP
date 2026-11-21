@@ -32,6 +32,10 @@ public actor CalendarService {
     /// keep `minutes * 60` from overflowing, not because anyone needs the range.
     private static let maxMinutes = 60 * 24 * 365
 
+    /// The most alerts `alarms_minutes_before` sets. Calendar takes more, but more
+    /// than a handful is a mistake rather than a wish.
+    static let maxAlarms = 5
+
     /// Calendar membership changes rarely, and `tools/list`-style enumerations get
     /// called repeatedly at the start of a conversation.
     /// The default title is cached with the list: returning it on a miss but not on
@@ -183,21 +187,11 @@ public actor CalendarService {
         try await ensureAccess()
 
         let title = try args.requiredString("title")
-        let startInput = try args.requiredDate("start")
-        let endInput = try args.optionalDate("end")
-
-        // All-day when neither endpoint carries a time. Keying off "no end was
-        // given" instead turned {start: 2026-10-01, end: 2026-10-03} into a timed
-        // 48-hour event running midnight to midnight, rather than a 3-day all-day
-        // event.
-        let datesOnly = !startInput.hasTime && !(endInput?.hasTime ?? false)
-        let allDay = try args.bool("all_day", default: datesOnly)
+        let alarmMinutes = try Self.requestedAlarmMinutes(args, creating: true)
 
         let event = EKEvent(eventStore: store)
         event.title = title
-        event.isAllDay = allDay
-        event.startDate = allDay ? Calendar.current.startOfDay(for: startInput.date) : startInput.date
-        event.endDate = try resolveEnd(args, endInput: endInput, start: event.startDate, allDay: allDay)
+        try Self.setTimes(args, on: event)
 
         let calendars = CalendarResolution.eventCalendars(in: store)
         if let requested = args.optionalString("calendar") {
@@ -216,24 +210,20 @@ public actor CalendarService {
         if let location = args.optionalString("location") { event.location = location }
         if let notes = args.optionalString("notes") { event.notes = notes }
         if let url = try args.optionalURL("url") { event.url = url }
-        if let rule = try Recurrence.rule(from: args) { event.addRecurrenceRule(rule) }
+        if let rule = try Recurrence.rule(from: args, start: event.startDate, timeZone: event.timeZone) { event.addRecurrenceRule(rule) }
         try applyAvailability(args, to: event)
-        // Bounded: `abs(Int.min)` and `minutes * 60` both trap on extreme input,
-        // and a year of lead time is already absurd for an alarm.
-        let alarmMinutes = try args.optionalInt("alarm_minutes_before", in: 0...Self.maxMinutes)
-        if let alarmMinutes {
-            event.addAlarm(EKAlarm(relativeOffset: TimeInterval(-alarmMinutes * 60)))
-        }
+        if let alarmMinutes { Self.replaceRelativeAlarms(on: event, minutesBefore: alarmMinutes) }
 
         try save(event, span: .futureEvents)
 
         // Saving adds the account's default alert (Calendar's "Default alert"
         // setting), so asking for 10 minutes left two alerts, 10 and 15, and
-        // asking for 15 left two at 15. An alert asked for replaces the default.
+        // asking for 15 left two at 15. The alerts asked for replace the default,
+        // and an empty list asks for none.
         // The event already exists by now, so a failure here must not read as a
         // failed create, or the model would try again and make a second one.
         var warning: String?
-        if let alarmMinutes, keepOnlyAlarm(minutesBefore: alarmMinutes, on: event) {
+        if let alarmMinutes, Self.keepOnlyAlarms(minutesBefore: alarmMinutes, on: event) {
             do {
                 try save(event, span: .futureEvents)
             } catch {
@@ -252,9 +242,38 @@ public actor CalendarService {
         return .object(out)
     }
 
+    /// Set a new event's all-day flag, time zone, start and end from `start`,
+    /// `end`, `duration_minutes`, `all_day` and `time_zone`. Touches no store.
+    static func setTimes(_ args: Arguments, on event: EKEvent) throws {
+        // Null or blank on create means "no zone", like the other optional fields.
+        let timeZone = args.clearableString("time_zone") == "" ? nil : try args.optionalTimeZone("time_zone")
+        var startInput = try args.requiredDate("start")
+        var endInput = try args.optionalDate("end")
+
+        // All-day when neither endpoint carries a time. Keying off "no end was
+        // given" instead turned {start: 2026-10-01, end: 2026-10-03} into a timed
+        // 48-hour event running midnight to midnight, rather than a 3-day all-day
+        // event.
+        let datesOnly = !startInput.hasTime && !(endInput?.hasTime ?? false)
+        let allDay = try args.bool("all_day", default: datesOnly)
+        event.isAllDay = allDay
+
+        // An all-day event has no zone: it is the same days everywhere, so it
+        // ignores time_zone. A timed one reads times without an offset as
+        // wall-clock time in its zone. The zone is set before the times, so they
+        // are taken as the instants given.
+        if let timeZone, !allDay {
+            event.timeZone = timeZone
+            startInput = try args.requiredDate("start", timeZone: timeZone)
+            endInput = try args.optionalDate("end", timeZone: timeZone)
+        }
+        event.startDate = allDay ? Calendar.current.startOfDay(for: startInput.date) : startInput.date
+        event.endDate = try resolveEnd(args, endInput: endInput, start: event.startDate, allDay: allDay)
+    }
+
     /// Resolve an event's end from `end` or `duration_minutes`, defaulting to a
     /// one-hour meeting or a single all-day day.
-    private func resolveEnd(
+    private static func resolveEnd(
         _ args: Arguments,
         endInput: (date: Date, hasTime: Bool)?,
         start: Date,
@@ -281,6 +300,8 @@ public actor CalendarService {
         try await ensureAccess()
 
         let span = try resolveSpan(args)
+        let timeZone = try args.optionalTimeZone("time_zone")
+        let alarmMinutes = try Self.requestedAlarmMinutes(args)
         let changesRepeat = Recurrence.isRequested(in: args)
         if changesRepeat, span == .thisEvent { try requireSeriesSpanForRepeatChange(args) }
         let event = try fetchEvent(args, span: span)
@@ -300,6 +321,55 @@ public actor CalendarService {
         // an absent key leaves the field alone, an explicit null or "" clears it.
         if let title = args.optionalString("title") { event.title = title }
 
+        try Self.changeTimes(args, on: event, timeZone: timeZone)
+
+        if let location = args.clearableString("location") {
+            event.location = location.isEmpty ? nil : location
+        }
+        if let notes = args.clearableString("notes") {
+            event.notes = notes.isEmpty ? nil : notes
+        }
+        if let url = try args.clearableURL("url") { event.url = url }
+
+        if args.contains("calendar"), let requested = args.optionalString("calendar") {
+            let cal = try CalendarResolution.resolve(
+                identifier: requested,
+                among: CalendarResolution.eventCalendars(in: store),
+                kind: "calendar"
+            )
+            try CalendarResolution.requireWritable(cal, kind: "calendar")
+            event.calendar = cal
+        }
+
+        try applyAvailability(args, to: event)
+        if let alarmMinutes { Self.replaceRelativeAlarms(on: event, minutesBefore: alarmMinutes) }
+
+        // A repeat belongs to the series from this occurrence on, so it is always
+        // saved that way; for an event that didn't repeat the span makes no
+        // difference.
+        var saveSpan = span.ekSpan
+        if changesRepeat {
+            try applyRepeat(args, to: event, splitsSeries: span == .futureEvents && !isFirstOccurrence(event))
+            saveSpan = .futureEvents
+        }
+
+        try save(event, span: saveSpan)
+
+        return .object([
+            "updated": .bool(true),
+            "span": .string(span.rawValue),
+            "event": CalendarMapping.event(event),
+        ])
+    }
+
+    /// Apply an update's `all_day`, `time_zone`, `start` and `end` to `event`.
+    /// Touches no store.
+    ///
+    /// - Parameter timeZone: the parsed `time_zone`. A timed event moves to it
+    ///   keeping its wall-clock times (9:00 in Los Angeles becomes 9:00 in New
+    ///   York), and a start or end without an offset is read in it. An all-day
+    ///   event has no zone and ignores it.
+    static func changeTimes(_ args: Arguments, on event: EKEvent, timeZone: TimeZone?) throws {
         let originalDuration = (event.endDate ?? event.startDate ?? Date())
             .timeIntervalSince(event.startDate ?? Date())
 
@@ -326,7 +396,13 @@ public actor CalendarService {
             }
         }
 
-        if let startInput = try args.optionalDate("start") {
+        // A new zone keeps the event's wall-clock times: 9:00 in Los Angeles
+        // becomes 9:00 in New York. A start or end given too is then read in the
+        // new zone. All-day events have no zone, so it is ignored for them.
+        let parseZone = event.isAllDay ? nil : timeZone
+        if let timeZone { Self.moveToTimeZone(event, timeZone) }
+
+        if let startInput = try args.optionalDate("start", timeZone: parseZone) {
             event.startDate = event.isAllDay
                 ? Calendar.current.startOfDay(for: startInput.date)
                 : startInput.date
@@ -336,7 +412,7 @@ public actor CalendarService {
                 event.endDate = start.addingTimeInterval(becameTimed ? 3600 : max(originalDuration, 0))
             }
         }
-        if let endInput = try args.optionalDate("end") {
+        if let endInput = try args.optionalDate("end", timeZone: parseZone) {
             event.endDate = event.isAllDay
                 ? Calendar.current.startOfDay(for: endInput.date)
                 : endInput.date
@@ -344,44 +420,6 @@ public actor CalendarService {
         if let start = event.startDate, let end = event.endDate, end < start {
             throw MacBridgeError.invalidArgument(name: "end", reason: "must not be before 'start'")
         }
-
-        if let location = args.clearableString("location") {
-            event.location = location.isEmpty ? nil : location
-        }
-        if let notes = args.clearableString("notes") {
-            event.notes = notes.isEmpty ? nil : notes
-        }
-        if let url = try args.clearableURL("url") { event.url = url }
-
-        if args.contains("calendar"), let requested = args.optionalString("calendar") {
-            let cal = try CalendarResolution.resolve(
-                identifier: requested,
-                among: CalendarResolution.eventCalendars(in: store),
-                kind: "calendar"
-            )
-            try CalendarResolution.requireWritable(cal, kind: "calendar")
-            event.calendar = cal
-        }
-
-        try applyAvailability(args, to: event)
-        try applyAlarm(args, to: event)
-
-        // A repeat belongs to the series from this occurrence on, so it is always
-        // saved that way; for an event that didn't repeat the span makes no
-        // difference.
-        var saveSpan = span.ekSpan
-        if changesRepeat {
-            try applyRepeat(args, to: event, splitsSeries: span == .futureEvents && !isFirstOccurrence(event))
-            saveSpan = .futureEvents
-        }
-
-        try save(event, span: saveSpan)
-
-        return .object([
-            "updated": .bool(true),
-            "span": .string(span.rawValue),
-            "event": CalendarMapping.event(event),
-        ])
     }
 
     // MARK: - calendar_reschedule_event
@@ -534,7 +572,9 @@ public actor CalendarService {
             change = try Recurrence.change(
                 from: args,
                 existing: event.recurrenceRules?.first,
-                splitsSeries: span == .futureEvents && !isFirstOccurrence(event)
+                splitsSeries: span == .futureEvents && !isFirstOccurrence(event),
+                start: event.startDate,
+                timeZone: event.timeZone
             )
         } catch {
             return (false, nil)
@@ -731,35 +771,73 @@ public actor CalendarService {
         }
     }
 
-    /// Replace the event's alerts before the start with the one in
-    /// `alarm_minutes_before`; null or "" removes them. Alerts at a fixed time or a
-    /// place are kept.
-    private func applyAlarm(_ args: Arguments, to event: EKEvent) throws {
-        guard args.contains("alarm_minutes_before") else { return }
-        let minutes: Int?
-        if args.isExplicitNull("alarm_minutes_before") || args.clearableString("alarm_minutes_before") == "" {
-            minutes = nil
-        } else {
-            minutes = try args.optionalInt("alarm_minutes_before", in: 0...Self.maxMinutes)
+    /// The alerts a call asks for, in minutes before the start, from
+    /// `alarm_minutes_before` (one) or `alarms_minutes_before` (a list).
+    ///
+    /// - Parameter creating: true for a new event, where null or `""` means the
+    ///   argument wasn't given, as for the other optional fields; only an empty
+    ///   list asks for no alerts (dropping Calendar's default one).
+    /// - Returns: nil when the call mentions neither; `[]` for null, `""` or an
+    ///   empty list on update, which removes the alerts; otherwise the minutes,
+    ///   without repeats, in the order given.
+    static func requestedAlarmMinutes(_ args: Arguments, creating: Bool = false) throws -> [Int]? {
+        let single = "alarm_minutes_before", list = "alarms_minutes_before"
+        func given(_ key: String) -> Bool {
+            args.contains(key) && !(creating && args.clearableString(key) == "")
         }
-        for alarm in event.alarms ?? [] where alarm.absoluteDate == nil && alarm.structuredLocation == nil {
+        guard given(single) || given(list) else { return nil }
+        if given(single), given(list) {
+            throw MacBridgeError.invalidArgument(
+                name: list,
+                reason: "pass \(single) or \(list), not both; \(list) takes every alert, as in [10, 60]"
+            )
+        }
+        // Bounded: `abs(Int.min)` and `minutes * 60` both trap on extreme input,
+        // and a year of lead time is already absurd for an alarm.
+        let range = 0...Self.maxMinutes
+        if given(single) {
+            if args.clearableString(single) == "" { return [] }
+            return try args.optionalInt(single, in: range).map { [$0] } ?? []
+        }
+        guard let minutes = try args.clearableIntList(list) else { return nil }
+        for value in minutes where !range.contains(value) {
+            throw MacBridgeError.invalidArgument(
+                name: list,
+                reason: "\(value) is out of range; each alert must be between 0 and \(Self.maxMinutes) minutes before"
+            )
+        }
+        var seen = Set<Int>()
+        let unique = minutes.filter { seen.insert($0).inserted }
+        guard unique.count <= Self.maxAlarms else {
+            throw MacBridgeError.invalidArgument(name: list, reason: "at most \(Self.maxAlarms) alerts")
+        }
+        return unique
+    }
+
+    /// Whether an alert counts down to the start, rather than firing at a fixed
+    /// time or at a place; only these are replaced by the alarm arguments.
+    private static func isRelative(_ alarm: EKAlarm) -> Bool {
+        alarm.absoluteDate == nil && alarm.structuredLocation == nil
+    }
+
+    /// Replace the event's alerts before the start with ones `minutesBefore` it;
+    /// an empty list removes them. Alerts at a fixed time or a place are kept.
+    static func replaceRelativeAlarms(on event: EKEvent, minutesBefore: [Int]) {
+        for alarm in event.alarms ?? [] where isRelative(alarm) {
             event.removeAlarm(alarm)
         }
-        if let minutes {
+        for minutes in minutesBefore {
             event.addAlarm(EKAlarm(relativeOffset: TimeInterval(-minutes * 60)))
         }
     }
 
-    /// Remove every alert before the start except one at `minutesBefore`.
-    /// Returns whether anything was removed.
-    private func keepOnlyAlarm(minutesBefore: Int, on event: EKEvent) -> Bool {
-        let wanted = TimeInterval(-minutesBefore * 60)
-        var kept = false
+    /// Remove every alert before the start except one at each of `minutesBefore`,
+    /// such as the default alert saving added. Returns whether anything was removed.
+    static func keepOnlyAlarms(minutesBefore: [Int], on event: EKEvent) -> Bool {
+        var wanted = Set(minutesBefore.map { TimeInterval(-$0 * 60) })
         var removed = false
-        for alarm in event.alarms ?? [] where alarm.absoluteDate == nil && alarm.structuredLocation == nil {
-            if alarm.relativeOffset == wanted && !kept {
-                kept = true
-            } else {
+        for alarm in event.alarms ?? [] where isRelative(alarm) {
+            if wanted.remove(alarm.relativeOffset) == nil {
                 event.removeAlarm(alarm)
                 removed = true
             }
@@ -767,11 +845,26 @@ public actor CalendarService {
         return removed
     }
 
+    /// Put a timed event in `zone`, keeping its wall-clock start and end, so 9:00
+    /// in its old zone is 9:00 in the new one. An event without a zone counts as in
+    /// the Mac's. All-day events have no zone and are left alone.
+    static func moveToTimeZone(_ event: EKEvent, _ zone: TimeZone) {
+        guard !event.isAllDay else { return }
+        let old = event.timeZone ?? .current
+        let start = event.startDate.map { DateParsing.reanchor($0, from: old, to: zone) }
+        let end = event.endDate.map { DateParsing.reanchor($0, from: old, to: zone) }
+        // Zone first, so the times are then taken as the instants given.
+        event.timeZone = zone
+        if let start { event.startDate = start }
+        if let end { event.endDate = end }
+    }
+
     /// Apply the repeat an update asks for.
     private func applyRepeat(_ args: Arguments, to event: EKEvent, splitsSeries: Bool) throws {
         if event.isDetached && !event.hasRecurrenceRules { try refuseRepeatChange(on: event) }
         switch try Recurrence.change(
-            from: args, existing: event.recurrenceRules?.first, splitsSeries: splitsSeries
+            from: args, existing: event.recurrenceRules?.first, splitsSeries: splitsSeries,
+            start: event.startDate, timeZone: event.timeZone
         ) {
         case .remove:
             for rule in event.recurrenceRules ?? [] { event.removeRecurrenceRule(rule) }

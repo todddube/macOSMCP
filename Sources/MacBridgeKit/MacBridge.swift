@@ -54,7 +54,7 @@ public enum MacBridge {
         through its parameters. Both return an "id" per item, which every write tool requires.
 
         Dates accept YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, ISO-8601, or relative values like today, \
-        tomorrow and +7d. Times are in the Mac's local time zone.
+        tomorrow and +7d. Times are in the Mac's local time zone, or an event's time_zone when given.
 
         Before proposing a meeting slot, call calendar_find_available_times rather than reading \
         events and reasoning about the gaps yourself.

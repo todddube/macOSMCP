@@ -106,6 +106,11 @@ public struct Arguments {
     /// A fractional number is truncated toward zero.
     public func optionalInt(_ key: String) throws -> Int? {
         guard let v = raw[key] else { return nil }
+        return try Self.integer(v, key: key)
+    }
+
+    /// One JSON number or numeric string as an integer; throws for anything else.
+    private static func integer(_ v: Value, key: String) throws -> Int {
         if let i = v.intValue { return i }
 
         if let d = v.doubleValue {
@@ -171,12 +176,15 @@ public struct Arguments {
     ///
     /// `hasTime` is false for date-only input such as `2026-10-01` or `tomorrow`,
     /// which callers use to decide between all-day and timed handling.
-    public func optionalDate(_ key: String) throws -> (date: Date, hasTime: Bool)? {
+    ///
+    /// - Parameter timeZone: the zone a date-time without an offset is wall-clock
+    ///   time in; nil for the Mac's. See ``DateParsing/parse(_:now:timeZone:)``.
+    public func optionalDate(_ key: String, timeZone: TimeZone? = nil) throws -> (date: Date, hasTime: Bool)? {
         // A number or boolean is a mistake, not an absent value: ignoring it would
         // let a call succeed while silently dropping what the caller asked for.
         try Self.requireStringOrNull(raw[key], key: key)
         guard let s = optionalString(key) else { return nil }
-        guard let parsed = DateParsing.parse(s) else {
+        guard let parsed = DateParsing.parse(s, timeZone: timeZone) else {
             throw MacBridgeError.invalidArgument(
                 name: key,
                 reason: "could not read '\(s)' as a date. Use YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS], "
@@ -219,16 +227,84 @@ public struct Arguments {
         }
     }
 
-    /// ``optionalDate(_:)``, but throws when the key is absent or blank.
-    public func requiredDate(_ key: String) throws -> (date: Date, hasTime: Bool) {
+    /// ``optionalDate(_:timeZone:)``, but throws when the key is absent or blank.
+    public func requiredDate(_ key: String, timeZone: TimeZone? = nil) throws -> (date: Date, hasTime: Bool) {
         guard contains(key) else { throw MacBridgeError.missingArgument(key) }
-        guard let parsed = try optionalDate(key) else {
+        guard let parsed = try optionalDate(key, timeZone: timeZone) else {
             throw MacBridgeError.invalidArgument(name: key, reason: "expected a date string")
         }
         return parsed
     }
 
+    // MARK: Time zones
+
+    /// An IANA time zone such as `America/New_York`, or nil when absent.
+    ///
+    /// Matched case-insensitively against the identifiers the system knows, plus
+    /// `UTC` and `GMT`. Abbreviations such as `EST` are refused rather than
+    /// guessed: they don't say whether daylight saving applies, and several are
+    /// used by more than one region. Null or blank throws, because there is no
+    /// zone to clear to.
+    public func optionalTimeZone(_ key: String) throws -> TimeZone? {
+        guard let value = raw[key] else { return nil }
+        let advice = "use an IANA time zone identifier such as America/New_York, Europe/London, "
+            + "Asia/Tokyo or UTC (not an abbreviation like EST or an offset like +05:00)"
+        guard let text = optionalString(key) else {
+            if value.stringValue != nil || value == .null {
+                throw MacBridgeError.invalidArgument(name: key, reason: "is empty; \(advice)")
+            }
+            throw MacBridgeError.invalidArgument(name: key, reason: "expected a string; \(advice)")
+        }
+        guard let zone = Self.timeZone(identifier: text) else {
+            throw MacBridgeError.invalidArgument(name: key, reason: "'\(text)' is not a known time zone; \(advice)")
+        }
+        return zone
+    }
+
+    /// The zone for an IANA identifier in any letter case; nil for anything else.
+    static func timeZone(identifier text: String) -> TimeZone? {
+        let wanted = text.lowercased()
+        if wanted == "utc" || wanted == "gmt" { return TimeZone(identifier: text.uppercased()) }
+        guard let known = TimeZone.knownTimeZoneIdentifiers.first(where: { $0.lowercased() == wanted }) else {
+            return nil
+        }
+        return TimeZone(identifier: known)
+    }
+
     // MARK: Arrays
+
+    /// A list of strings that may be cleared: nil when the key is absent, `[]` for
+    /// null, `""` or an empty array, the trimmed items otherwise. A bare string is a
+    /// one-item list. A blank or non-string item throws rather than being dropped.
+    public func clearableStringList(_ key: String) throws -> [String]? {
+        guard let value = raw[key] else { return nil }
+        if case .null = value { return [] }
+        if let text = value.stringValue, text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
+        return try (value.arrayValue ?? [value]).map { item in
+            guard let text = item.stringValue else {
+                throw MacBridgeError.invalidArgument(name: key, reason: "expected a list of strings")
+            }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw MacBridgeError.invalidArgument(name: key, reason: "contains a blank item")
+            }
+            return trimmed
+        }
+    }
+
+    /// A list of integers that may be cleared: nil when the key is absent, `[]` for
+    /// null, `""` or an empty array, the items otherwise. A bare number is a
+    /// one-item list. An item that isn't a whole number throws.
+    public func clearableIntList(_ key: String) throws -> [Int]? {
+        guard let value = raw[key] else { return nil }
+        if case .null = value { return [] }
+        if let text = value.stringValue, text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
+        do {
+            return try (value.arrayValue ?? [value]).map { try Self.integer($0, key: key) }
+        } catch {
+            throw MacBridgeError.invalidArgument(name: key, reason: "expected a list of whole numbers")
+        }
+    }
 
     /// Non-blank trimmed strings from an array, or a single string as a one-element
     /// list; nil when absent or nothing usable remains.
