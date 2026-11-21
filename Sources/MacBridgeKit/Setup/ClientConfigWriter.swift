@@ -131,16 +131,6 @@ public enum ClientConfigWriter {
         return (remove, flags)
     }
 
-    /// The MacBridge entry names in a config file's top-level `mcpServers`, or none
-    /// when the file is missing or unreadable.
-    public static func macbridgeEntryNames(inConfigAt url: URL) -> [String] {
-        guard let data = try? Data(contentsOf: url),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let servers = root["mcpServers"] as? [String: Any]
-        else { return [] }
-        return macbridgeEntryNames(in: servers)
-    }
-
     /// Add MacBridge to the config at `url`, creating the file if needed.
     ///
     /// Two copies are kept beside the file:

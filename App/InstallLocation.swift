@@ -27,11 +27,21 @@ enum InstallLocation {
     /// Ask to move the app if it's running from somewhere other than an Applications
     /// folder.
     ///
-    /// - Parameter continueLaunch: Runs when this copy should carry on as normal:
+    /// - Parameters:
+    ///   - whileAsking: Runs just before the alert, so the bridge serves requests
+    ///     while it is up. Not called when no alert is shown.
+    ///   - beforeMove: Runs when the user chose to move, before anything is copied:
+    ///     the bridge stops, so the copy in /Applications gets the socket. Starting
+    ///     again is `continueLaunch`'s job if the move fails.
+    ///   - continueLaunch: Runs when this copy should carry on as normal:
     ///   no move was needed, the user declined, or the move or relaunch failed.
     ///   It doesn't run when the copy in /Applications has taken over and this one
     ///   is quitting.
-    static func offerMoveIfNeeded(otherwise continueLaunch: @escaping () -> Void) {
+    static func offerMoveIfNeeded(
+        whileAsking: () -> Void,
+        beforeMove: () -> Void,
+        otherwise continueLaunch: @escaping () -> Void
+    ) {
         let bundle = Bundle.main.bundleURL
         let current = bundle.resolvingSymlinksInPath()
         guard InstallPolicy.shouldOfferMove(
@@ -45,11 +55,10 @@ enum InstallLocation {
             return
         }
 
-        if #available(macOS 14, *) {
-            NSApp.activate()
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        // The bridge comes up behind the alert: a shim that launched this copy gives
+        // up if nothing is listening within seconds, and the alert can sit open.
+        whileAsking()
+        NSApp.activate()
 
         let alert = NSAlert()
         alert.messageText = "Move MacBridge to your Applications folder?"
@@ -72,6 +81,7 @@ enum InstallLocation {
             return
         }
 
+        beforeMove()
         do {
             try move(from: current)
         } catch {

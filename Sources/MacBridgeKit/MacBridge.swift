@@ -13,7 +13,32 @@ import Foundation
 public enum MacBridge {
     public static let serverName = "macbridge"
     /// Must match MARKETING_VERSION in project.yml; `VersionTests` fails if they drift.
-    public static let version = "1.8.0"
+    public static let version = "1.9.0"
+
+    /// The day `version` was cut, as YYYY-MM-DD. Bump it with `version`; `VersionTests`
+    /// checks it against the newest entry in the README's version history.
+    public static let releaseDate = "2026-11-20"
+
+    /// The release date for people, in their locale: "November 20, 2026".
+    /// Read and written in UTC, so no time zone moves it to another day. Falls back
+    /// to the raw YYYY-MM-DD if it doesn't parse.
+    public static var releaseDateText: String {
+        let utc = TimeZone(identifier: "UTC")!
+        let parts = releaseDate.split(separator: "-").compactMap { Int($0) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        guard parts.count == 3,
+              let day = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+        else { return releaseDate }
+        var style = Date.FormatStyle.dateTime.year().month(.wide).day()
+        style.timeZone = utc
+        return day.formatted(style)
+    }
+
+    /// Version and release date together, as people see it: "1.9.0 · November 20, 2026".
+    public static var versionWithDate: String {
+        "\(version) · \(releaseDateText)"
+    }
 
     /// Sent to clients as MCP `instructions`: the orientation a model gets
     /// before it has called anything.

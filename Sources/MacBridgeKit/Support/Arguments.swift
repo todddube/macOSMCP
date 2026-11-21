@@ -172,6 +172,9 @@ public struct Arguments {
     /// `hasTime` is false for date-only input such as `2026-10-01` or `tomorrow`,
     /// which callers use to decide between all-day and timed handling.
     public func optionalDate(_ key: String) throws -> (date: Date, hasTime: Bool)? {
+        // A number or boolean is a mistake, not an absent value: ignoring it would
+        // let a call succeed while silently dropping what the caller asked for.
+        try Self.requireStringOrNull(raw[key], key: key)
         guard let s = optionalString(key) else { return nil }
         guard let parsed = DateParsing.parse(s) else {
             throw MacBridgeError.invalidArgument(
@@ -182,6 +185,38 @@ public struct Arguments {
             )
         }
         return parsed
+    }
+
+    /// A date that may be cleared: nil when the key is absent, `.some(nil)` for an
+    /// explicit null or an empty string, `.some(date)` otherwise. Anything that is
+    /// not a string (a number, a boolean) or a blank-but-not-empty string throws,
+    /// so it can never be mistaken for a request to clear.
+    public func clearableDate(_ key: String) throws -> (date: Date, hasTime: Bool)?? {
+        guard let value = raw[key] else { return nil }
+        if case .null = value { return .some(nil) }
+        guard let text = value.stringValue else {
+            throw MacBridgeError.invalidArgument(name: key, reason: Self.dateStringAdvice)
+        }
+        if text.isEmpty { return .some(nil) }
+        guard optionalString(key) != nil else {
+            throw MacBridgeError.invalidArgument(
+                name: key,
+                reason: "is blank. Pass a date string to set it, or null or \"\" to clear it."
+            )
+        }
+        return .some(try optionalDate(key))
+    }
+
+    private static let dateStringAdvice =
+        "expected a date string such as 2026-10-01 or 2026-10-01T14:00:00 (not a number or boolean); "
+        + "pass null or \"\" to clear it"
+
+    private static func requireStringOrNull(_ value: Value?, key: String) throws {
+        guard let value else { return }
+        if case .null = value { return }
+        guard value.stringValue != nil else {
+            throw MacBridgeError.invalidArgument(name: key, reason: dateStringAdvice)
+        }
     }
 
     /// ``optionalDate(_:)``, but throws when the key is absent or blank.

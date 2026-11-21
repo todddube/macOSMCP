@@ -22,8 +22,8 @@ import MacBridgeKit
 // connects to MacBridge.app over a Unix socket, launching the app if it is not
 // yet running, and forwards tool calls to it. The app owns EventKit, so TCC is
 // granted once to the app rather than to whatever spawned this process, and the
-// user can see every call from the menu bar, and will be able to gate it once
-// per-client consent lands.
+// user can see every call from the menu bar and gate it with the app's access
+// policy (Read-only, confirm before deleting).
 //
 // `macbridge mcp --direct` runs EventKit in this process with no app required,
 // which is how the tools are exercised in tests.
@@ -218,7 +218,11 @@ func runMCPServer(backend: ToolBackend) async throws {
             let message = (error as? MacBridgeError)?.errorDescription
                 ?? (error as? BridgeClient.ClientError)?.errorDescription
                 ?? error.localizedDescription
-            let logged = (error as? MacBridgeError)?.logDescription ?? message
+            // A bridged failure arrives as a ClientError carrying only the app's
+            // redacted text for the log; its message can echo titles and names.
+            let logged = (error as? MacBridgeError)?.logDescription
+                ?? (error as? BridgeClient.ClientError)?.logDescription
+                ?? "the tool failed (details withheld from the log)"
             log("\(params.name) failed: \(message)", isError: true,
                 persisted: "\(params.name) failed: \(logged)")
             return CallTool.Result(
@@ -295,7 +299,7 @@ enum CLI {
             printUsage()
 
         case "--version", "version":
-            print("macbridge \(MacBridge.version)")
+            print("macbridge \(MacBridge.version) (\(MacBridge.releaseDate))")
 
         case nil:
             printUsage()

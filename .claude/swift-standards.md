@@ -4,20 +4,20 @@ These rules apply on top of the global baseline in `~/.claude/swift-standards.md
 Where the two disagree, this file wins. The `swift-code-reviewer` agent keeps the
 "Platform baseline" current.
 
-Last verified: 2026-10-18
+Last verified: 2026-11-20
 
 ## Platform baseline
 
 | Item | Value | Where it is set |
 |---|---|---|
-| Toolchain | Apple Swift 6.4 (Xcode) | `xcrun swift --version` |
+| Toolchain | Apple Swift 6.4.2 (Xcode 27.2) | `xcrun swift --version` |
 | Tools version | 6.0 | `Package.swift` line 1 |
 | Language mode | Swift 5 (deliberate) | `swiftLanguageMode(.v5)` in `Package.swift`, `project.yml` |
-| Deployment target | macOS 13 | `Package.swift` `platforms` |
+| Deployment target | macOS 14 | `Package.swift` `platforms` |
 | Tests | swift-testing only | `Tests/`; `make test` (needs Xcode) |
 | UI | SwiftUI `MenuBarExtra` + AppKit | `App/` |
 | Dependencies | `modelcontextprotocol/swift-sdk` (`MCP`) only, pinned `0.12.x` | `Package.swift` (`.upToNextMinor`) and `project.yml` (`minorVersion`); a test keeps them equal |
-| Minimum Xcode | 16.3 (swift-sdk 0.12 declares tools 6.1) | CI: `macos-15` runner |
+| Minimum Xcode | 26 (the app icon is an Icon Composer `.icon`) | CI: `macos-26` runner |
 | License | MIT, © 2026 Todd Dube | `LICENSE`, `THIRD_PARTY_NOTICES.md`, `Credits.swift` |
 
 **Deliberate decisions. Do not flag these:**
@@ -60,7 +60,7 @@ Keep the year as the year of first publication; don't bump it per edit.
 - `MacBridgeKit` must not import AppKit or SwiftUI. It is terminal-testable
   (`Reveal.swift` shows how to open URLs without linking AppKit).
 - **EventKit:** check authorization before every store access. Use the macOS 14+
-  full-access APIs behind `#available`, with a macOS 13 fallback. Commit saves, and
+  full-access APIs (macOS 14+, the deployment target). Commit saves, and
   choose `.thisEvent` vs `.futureEvents` on purpose.
 - **TCC:** a new protected resource needs its usage key in both
   `Sources/macbridge/Info.plist` and the app plist defined in `project.yml`.
@@ -79,6 +79,7 @@ Keep the year as the year of first publication; don't bump it per edit.
 - MCP Swift SDK: https://github.com/modelcontextprotocol/swift-sdk
 
 Changes:
+- 2026-11-20 — Deployment target macOS 14; minimum Xcode 26; CI on `macos-26`.
 - 2026-10-18 — Baseline: swift-sdk pinned to 0.12.x in both manifests; minimum Xcode 16.3; CI added.
 - 2026-10-09 — MIT copyright line in every header; credits rule for dependencies.
 - 2026-10-05 — Initial project standards; general rules moved to the global file.

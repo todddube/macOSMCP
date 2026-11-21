@@ -1,14 +1,14 @@
 # MacBridge
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Platform: macOS 13+](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey.svg)
+![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg)
 ![Swift](https://img.shields.io/badge/Swift-6-orange.svg)
 
-**v1.8.0** — a free, open-source macOS **menu-bar app and MCP server** that gives Claude Code and Claude Desktop read
+**v1.9.0** (2026-11-20) — a free, open-source macOS **menu-bar app and MCP server** that gives Claude Code and Claude Desktop read
 and write access to your **Calendar** and **Reminders**, through EventKit, entirely on your Mac.
 
 Swift package + Xcode app. No Python, no Node, and no network use except **Check for Updates…**,
-when you click it. Requires macOS 13+. Free to use, modify and share under the
+when you click it. Requires macOS 14+. Free to use, modify and share under the
 [MIT License](LICENSE). To build it yourself, see [BUILDING.md](BUILDING.md).
 
 ```
@@ -55,7 +55,7 @@ for every event. `calendar_update_event` changes alerts, availability and how an
 
 ## Install
 
-You don't need to build anything. Requires **macOS 13 or later**.
+You don't need to build anything. Requires **macOS 14 or later**.
 
 1. **Download** `MacBridge-<version>.dmg` from the
    [latest release](https://github.com/todddube/macOSMCP/releases/latest).
@@ -79,7 +79,7 @@ git clone https://github.com/todddube/macOSMCP.git && cd macOSMCP
 make install     # build, install to /Applications, launch
 ```
 
-Needs Xcode 16.3 or later. Then **Grant** and **Connect** as above. [BUILDING.md](BUILDING.md) covers
+Needs Xcode 26 or later. Then **Grant** and **Connect** as above. [BUILDING.md](BUILDING.md) covers
 the rest: tests, Xcode, signing so permissions survive rebuilds, and making a release.
 
 ## First run
@@ -88,7 +88,7 @@ MacBridge does nothing on its own — a client has to be told to run `macbridge 
 panel states where you are:
 
 ```
-  ● MacBridge 1.8.0                          18 tools
+  ● MacBridge 1.9.0                          18 tools
     Listening — 12 calls, 1 failed
 
   PERMISSIONS
@@ -281,6 +281,22 @@ Copyright © 2026 Todd Dube. Released under the [MIT License](LICENSE): free to 
 and distribute, with no warranty. Every source file carries the copyright notice in its header.
 
 ## Version history
+
+**1.9.0** · 2026-11-20 — macOS 26/27 polish, safer confirmations, and richer tool metadata.
+Requires macOS 14 or later. The delete confirmation now floats above whatever app you're in
+without taking the keyboard, has no default button (Escape cancels), and counts down to its
+deadline; while it waits, other tool calls keep working, and a second request queues behind it
+with its own deadline. A new **Settings** window (⌘, or **Settings…**) holds Safety, Launch at
+Login and Diagnostics, and opens when you open MacBridge from Finder, so hiding the menu-bar
+icon never strands you. The menu-bar icon is a template image when idle, so it follows the menu
+bar's colors, with status dots drawn into it; the panel scrolls on small screens, uses no text
+below 10 points, and shows Claude Desktop's two connections as one client with 2 sessions. Every tool has a readable title for client UIs; the three destructive tools tell
+Claude Code to always ask; and the read tools publish an output schema. Client names are now
+worked out by MacBridge from the process tree rather than taken on the client's word, and error
+details that could contain titles no longer reach the log. `find_available_times` caps its range
+like search does, and a non-text `due` is refused instead of clearing the date. The app icon is a
+layered Icon Composer icon that adapts to dark, tinted and clear appearances. About and
+`macbridge --version` show the release date.
 
 **1.8.0** — Open-source release, one-click setup, and safer edits.
 Released under the MIT License, with a copyright notice in every source file. Added

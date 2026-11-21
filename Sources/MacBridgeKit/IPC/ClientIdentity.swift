@@ -11,12 +11,20 @@ import Foundation
 
 /// Who is on the other end of a bridge connection.
 ///
-/// `name` is self-reported by the shim, for display and for keying consent;
-/// `pid` and `executablePath` come from the kernel and are what a security
-/// decision should rest on.
+/// Everything here is established by the app, not taken on trust from the peer.
+/// `pid` is the socket peer's pid from the kernel. When the peer is the `macbridge`
+/// shim, `executablePath` and `name` come from walking the shim's ancestors to the
+/// AI client; when it is any other process, that process is itself the client. The
+/// peer's self-reported name is never used as `name`: with nothing derivable the name
+/// is "Unknown client", and the report is kept as ``claimedName`` whenever it differs
+/// from the derived name. Anything that shows or keys on a name (the confirmation
+/// prompt, a consent store) should use `name` together with `executablePath`, and
+/// mention `claimedName` when set. Code-signature checks of the peer are not made.
 public struct ClientIdentity: Sendable, Hashable, Identifiable {
     public let id: UUID
     public let name: String
+    /// The name the peer reported about itself when it differs from ``name``; nil when they agree.
+    public let claimedName: String?
     public let version: String?
     public let pid: Int32
     public let executablePath: String?
@@ -25,6 +33,7 @@ public struct ClientIdentity: Sendable, Hashable, Identifiable {
     public init(
         id: UUID = UUID(),
         name: String,
+        claimedName: String? = nil,
         version: String? = nil,
         pid: Int32,
         executablePath: String? = nil,
@@ -32,6 +41,7 @@ public struct ClientIdentity: Sendable, Hashable, Identifiable {
     ) {
         self.id = id
         self.name = name
+        self.claimedName = claimedName
         self.version = version
         self.pid = pid
         self.executablePath = executablePath

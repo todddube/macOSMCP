@@ -1,0 +1,38 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "srgb:0.14902,0.36078,0.65882,1.00000",
+      "srgb:0.06275,0.14902,0.32157,1.00000"
+    ],
+    "orientation" : {
+      "start" : { "x" : 0.1, "y" : 0 },
+      "stop" : { "x" : 0.9, "y" : 1 }
+    }
+  },
+  "groups" : [
+    {
+      "name" : "Bridge",
+      "layers" : [
+        { "name" : "Structure", "image-name" : "bridge-structure.png", "glass" : true },
+        { "name" : "Cables", "image-name" : "bridge-cables.png", "glass" : false }
+      ],
+      "lighting" : "individual",
+      "shadow" : { "kind" : "layer-color", "opacity" : 0.4 },
+      "specular" : true,
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    },
+    {
+      "name" : "Mac mini",
+      "layers" : [
+        { "name" : "Mac mini", "image-name" : "mac-mini.png", "glass" : true }
+      ],
+      "lighting" : "combined",
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "specular" : true,
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [ "macOS" ]
+  }
+}

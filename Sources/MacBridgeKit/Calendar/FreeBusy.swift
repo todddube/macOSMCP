@@ -67,6 +67,22 @@ public enum FreeBusy {
         return result
     }
 
+    /// `end`, pulled back to `maxDays` after `start` when it is further out.
+    ///
+    /// Without a cap, `end_date: "+999999d"` would build millions of daily windows
+    /// on the service actor, and EventKit silently truncates a longer busy query.
+    public static func cappedEnd(
+        from start: Date,
+        to end: Date,
+        maxDays: Int,
+        calendar: Calendar = .current
+    ) -> (end: Date, narrowed: Bool) {
+        guard let limit = calendar.date(byAdding: .day, value: maxDays, to: start), end > limit else {
+            return (end, false)
+        }
+        return (limit, true)
+    }
+
     /// The working-hours window for each day in `range`.
     ///
     /// Days where the window would be empty or inverted are skipped, so callers

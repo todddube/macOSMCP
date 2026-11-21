@@ -32,7 +32,11 @@ public enum UpdateCheck {
 
     /// Check GitHub, comparing against `current`.
     public static func run(current: String = MacBridge.version, session: URLSession = .shared) async throws -> Result {
-        var request = URLRequest(url: latestReleaseURL, timeoutInterval: 15)
+        var request = URLRequest(
+            url: latestReleaseURL,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 15
+        )
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("MacBridge/\(current)", forHTTPHeaderField: "User-Agent")
 
@@ -53,10 +57,24 @@ public enum UpdateCheck {
             let html_url: URL
         }
         let release = try JSONDecoder().decode(Release.self, from: data)
+        // The page is opened in the user's browser, so it must be this project's.
+        guard isTrustedReleasePage(release.html_url) else {
+            throw URLError(.badServerResponse, userInfo: [
+                NSLocalizedDescriptionKey: "GitHub's reply pointed at an unexpected page, so it was ignored.",
+            ])
+        }
         let latest = version(fromTag: release.tag_name)
         return isNewer(latest, than: current)
             ? .available(version: latest, page: release.html_url)
             : .upToDate(latest: latest)
+    }
+
+    /// True for an https github.com page under this project's repository.
+    static func isTrustedReleasePage(_ url: URL) -> Bool {
+        guard url.scheme == "https", url.host?.lowercased() == "github.com",
+              url.user == nil, url.port == nil
+        else { return false }
+        return url.path.hasPrefix("/todddube/macOSMCP/")
     }
 
     /// "v1.9.0" → "1.9.0".
@@ -66,10 +84,10 @@ public enum UpdateCheck {
 
     /// True when `candidate` is a later version than `current`, comparing numeric
     /// parts in order, with missing parts as 0 (1.9 equals 1.9.0). Anything after
-    /// a hyphen is ignored.
+    /// a hyphen (prerelease) or plus (build metadata) is ignored.
     static func isNewer(_ candidate: String, than current: String) -> Bool {
         func parts(_ version: String) -> [Int] {
-            let core = version.split(separator: "-", maxSplits: 1).first.map(String.init) ?? version
+            let core = version.split(whereSeparator: { $0 == "-" || $0 == "+" }).first.map(String.init) ?? version
             return core.split(separator: ".").map { Int($0) ?? 0 }
         }
         let a = parts(candidate), b = parts(current)

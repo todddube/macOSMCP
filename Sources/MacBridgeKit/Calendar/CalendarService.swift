@@ -584,17 +584,20 @@ public actor CalendarService {
         let searchStart = max(requestedStart, Self.nextQuarterHour(after: now))
         let endInput = try args.optionalDate("end_date")
         let rawEnd = endInput?.date ?? calendar.date(byAdding: .day, value: 6, to: requestedStart) ?? requestedStart
-        let searchEnd = (endInput?.hasTime ?? false) ? rawEnd : DateParsing.endOfDay(rawEnd)
+        let uncappedEnd = (endInput?.hasTime ?? false) ? rawEnd : DateParsing.endOfDay(rawEnd)
 
-        guard searchEnd > requestedStart else {
+        guard uncappedEnd > requestedStart else {
             throw MacBridgeError.invalidArgument(name: "end_date", reason: "must be after start_date")
         }
-        guard searchEnd > searchStart else {
+        guard uncappedEnd > searchStart else {
             throw MacBridgeError.invalidArgument(
                 name: "end_date",
                 reason: "the whole range is in the past; only future times can be offered"
             )
         }
+        let (searchEnd, narrowed) = FreeBusy.cappedEnd(
+            from: searchStart, to: uncappedEnd, maxDays: Self.maxSpanDays, calendar: calendar
+        )
 
         let duration = try args.int("duration_minutes", default: 30, in: 1...(60 * 24))
         let dayStart = try args.int("day_start_hour", default: 9, in: 0...23)
@@ -667,6 +670,9 @@ public actor CalendarService {
             "searched_to": .string(DateParsing.offsetDateTime.string(from: searchEnd)),
             "working_hours": .string(String(format: "%02d:00–%02d:00", dayStart, dayEnd)),
         ]
+        if narrowed {
+            out["warning"] = .string("Range narrowed to four years; EventKit cannot query a longer span in one call.")
+        }
         if !ignored.isEmpty {
             out["ignored"] = .string(
                 "Birthdays and all-day events on subscribed calendars (\(ignored.sorted().joined(separator: ", "))) "

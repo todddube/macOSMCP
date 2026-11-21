@@ -29,21 +29,25 @@ defaults:
 jobs:
   test:
     name: Build and test
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Toolchain
+        id: toolchain
         run: |
           xcodebuild -version
           swift --version
+          echo "xcode=$(xcodebuild -version | awk 'NR==2 {print $3}')" >> "$GITHUB_OUTPUT"
 
+      # Keyed on the Xcode build too: build products from one compiler aren't
+      # reusable by another, and a stale cache fails in confusing ways.
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /private/tmp/macbridge-build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          key: spm-${{ runner.os }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('Package.resolved') }}
 
       # The Makefile looks for /Applications/Xcode.app; pass the runner's selected
       # Xcode instead, so an image without that path still works.
@@ -55,10 +59,10 @@ jobs:
 
   app:
     name: Build the app
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Building the committed MacBridge.xcodeproj needs no xcodegen. This flags
       # a project.yml change that wasn't regenerated and committed. A warning, not

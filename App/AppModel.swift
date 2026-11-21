@@ -64,9 +64,11 @@ final class AppModel: ObservableObject {
 
     private let registry = ToolRegistry()
     private var server: BridgeServer?
-    /// The last confirmation asked for, so the next waits for it: two deletes
-    /// arriving together get two alerts in turn rather than one on top of the other.
-    private var confirmationTail: Task<Void, Never>?
+    private var clientSetupRefresh: Task<Void, Never>?
+    /// Server events in arrival order, consumed by one task so a connect and the
+    /// disconnect after it are never handled the other way round.
+    private var eventContinuation: AsyncStream<BridgeServer.Event>.Continuation?
+    private var eventTask: Task<Void, Never>?
 
     /// One store, used only for permission checks and requests. The services in
     /// MacBridgeKit hold their own.
@@ -79,10 +81,22 @@ final class AppModel: ObservableObject {
         refreshLaunchAtLogin()
     }
 
-    /// Re-read the client config files. Cheap, and they change outside the app —
-    /// someone runs `claude mcp add` in a terminal and expects the panel to notice.
+    /// Re-read the client config files, which change outside the app — someone runs
+    /// `claude mcp add` in a terminal and expects the panel to notice.
+    ///
+    /// Read on a background thread: `~/.claude.json` is often several megabytes, and
+    /// this runs at launch and after every Connect. The result lands on the main
+    /// actor; a newer refresh supersedes one still in flight.
     func refreshClientSetup() {
-        clientSetup = ClientSetup.detect(shimPath: shimPath)
+        let shim = shimPath
+        clientSetupRefresh?.cancel()
+        clientSetupRefresh = Task {
+            let detected = await Task.detached(priority: .userInitiated) {
+                ClientSetup.detect(shimPath: shim)
+            }.value
+            guard !Task.isCancelled else { return }
+            clientSetup = detected
+        }
     }
 
     /// True when at least one client is pointed at this app.
@@ -102,24 +116,37 @@ final class AppModel: ObservableObject {
 
         do {
             let socketURL = try BridgeProtocol.socketURL()
+            let (events, continuation) = AsyncStream.makeStream(of: BridgeServer.Event.self)
             let server = BridgeServer(
                 registry: registry,
                 socketURL: socketURL,
                 authorize: { [weak self] request, identity in
                     // Fail closed: a policy check that can't run must not allow.
+                    // The confirmation budget starts here, before the hop to the main
+                    // actor, so a busy main actor eats into it rather than extending it.
+                    let arrived = Date()
                     guard let self, let tool = request.name else { return AccessPolicy.unavailable }
-                    return await self.authorize(tool: tool, arguments: request.arguments, client: identity)
+                    return await self.authorize(
+                        tool: tool, arguments: request.arguments, client: identity, arrivedAt: arrived)
                 },
-                observe: { [weak self] event in
-                    // Observer is called from the server's connection queues.
-                    Task { @MainActor [weak self] in self?.handle(event) }
+                observe: { event in
+                    // Observer is called from the server's connection queues;
+                    // yielding keeps the order, which a Task per event did not.
+                    continuation.yield(event)
                 }
             )
             try server.start()
             self.server = server
+            eventContinuation = continuation
+            eventTask = Task { [weak self] in
+                for await event in events {
+                    guard let self, !Task.isCancelled else { return }
+                    self.handle(event)
+                }
+            }
             state = .listening(path: socketURL.path)
             BridgeLog.info(
-                "MacBridge \(MacBridge.version) started from \(Bundle.main.bundlePath)",
+                "MacBridge \(MacBridge.version) (\(MacBridge.releaseDate)) started from \(Bundle.main.bundlePath)",
                 category: .app
             )
         } catch {
@@ -131,7 +158,9 @@ final class AppModel: ObservableObject {
     // MARK: Access policy
 
     /// Apply ``policy`` to one call: nil to run it, or the refusal the model sees.
-    private func authorize(tool: String, arguments: [String: Value]?, client: ClientIdentity) async -> String? {
+    private func authorize(
+        tool: String, arguments: [String: Value]?, client: ClientIdentity, arrivedAt arrived: Date
+    ) async -> String? {
         switch policy.decision(for: tool, arguments: arguments) {
         case .allow:
             return nil
@@ -139,10 +168,12 @@ final class AppModel: ObservableObject {
             BridgeLog.info("\(tool) refused — read-only mode", category: .tools)
             return message
         case .confirm:
-            let deadline = Date().addingTimeInterval(ConfirmationPrompt.budget)
+            let deadline = arrived.addingTimeInterval(ConfirmationPrompt.budget)
             let (needed, target) = await registry.confirmation(tool, arguments: arguments)
             guard needed else { return nil }
-            switch await confirm(client: client.name, tool: tool, target: target, deadline: deadline) {
+            // Not blocking: ConfirmationPrompt queues alerts and suspends this call,
+            // leaving the main actor free for everything else.
+            switch await ConfirmationPrompt.ask(client: client, tool: tool, target: target, deadline: deadline) {
             case .approved:
                 BridgeLog.info("\(tool) approved by the user", category: .tools)
                 return nil
@@ -156,23 +187,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Show the confirmation once any earlier one has been answered.
-    private func confirm(
-        client: String, tool: String, target: String?, deadline: Date
-    ) async -> ConfirmationPrompt.Outcome {
-        let previous = confirmationTail
-        let prompt = Task { @MainActor () -> ConfirmationPrompt.Outcome in
-            await previous?.value
-            return ConfirmationPrompt.ask(client: client, tool: tool, target: target, deadline: deadline)
-        }
-        confirmationTail = Task { _ = await prompt.value }
-        return await prompt.value
-    }
-
     /// Stop serving and remove the socket. Connected shims reconnect when it returns.
     func stop() {
         server?.stop()
         server = nil
+        // Connections still draining report `.disconnected` after the stream is
+        // finished, and that is dropped; clear the connected-session list here so
+        // no ghost sessions outlive a restart. Shims reconnect and re-announce.
+        log.clearConnectedClients()
+        // Calls waiting on a delete confirmation belong to connections that just closed.
+        ConfirmationPrompt.cancelAll()
+        eventContinuation?.finish()
+        eventContinuation = nil
+        // Events still buffered behind the finish must not re-add a session.
+        eventTask?.cancel()
+        eventTask = nil
         state = .stopped
     }
 
@@ -269,7 +298,7 @@ final class AppModel: ObservableObject {
     /// Everything worth pasting into a bug report, in one block.
     func diagnosticsReport() -> String {
         var lines: [String] = []
-        lines.append("MacBridge \(MacBridge.version)")
+        lines.append("MacBridge \(MacBridge.version) (\(MacBridge.releaseDate))")
         lines.append("bundle:     \(Bundle.main.bundlePath)")
         lines.append("binary:     \(shimPath)")
         lines.append("at login:   \(launchAtLogin)")
@@ -307,13 +336,9 @@ final class AppModel: ObservableObject {
         if !recent.isEmpty {
             lines.append("")
             lines.append("Recent log")
-            // Versions before 1.8.0 logged titles in curly quotes; this report is
-            // meant for a public issue, so blank any that are still in the file.
-            lines.append(contentsOf: recent.map {
-                "  " + $0.replacingOccurrences(
-                    of: "\u{201C}[^\u{201D}]*\u{201D}", with: "\u{201C}…\u{201D}", options: .regularExpression
-                )
-            })
+            // Older versions logged titles in quotes; this report is meant for a
+            // public issue, so blank any that are still in the file.
+            lines.append(contentsOf: recent.map { "  " + DiagnosticsRedaction.redactQuotedText($0) })
         }
         return lines.joined(separator: "\n")
     }
@@ -405,10 +430,35 @@ final class AppModel: ObservableObject {
         EventKitAuthorization.statusDescription(permissions[domain] ?? .notDetermined)
     }
 
-    /// Grant prompts in flight; the Dock icon stays until the last one is answered.
-    private var pendingGrantRequests = 0
-    /// The activation policy to return to once no prompt is in flight.
-    private var policyBeforeGrant: NSApplication.ActivationPolicy = .accessory
+    /// A claim on the app being a regular (Dock) app; see ``holdRegularPolicy()``.
+    final class PolicyHold {
+        fileprivate var released = false
+    }
+
+    /// Holds that are active; the app is `.regular` while there is at least one.
+    private var regularPolicyHolds = 0
+    /// The activation policy to return to once the last hold is released.
+    private var policyBeforeHolds: NSApplication.ActivationPolicy = .accessory
+
+    /// Become a regular app and activate, for a window or system prompt that an
+    /// accessory app can't present in front. Every caller (Grant, Settings) shares
+    /// one count, so whichever finishes first does not drop the other's window; the
+    /// original policy returns when the last hold is released.
+    func holdRegularPolicy() -> PolicyHold {
+        if regularPolicyHolds == 0 { policyBeforeHolds = NSApp.activationPolicy() }
+        regularPolicyHolds += 1
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
+        return PolicyHold()
+    }
+
+    /// Release a hold from ``holdRegularPolicy()``. Releasing twice does nothing.
+    func releaseRegularPolicy(_ hold: PolicyHold) {
+        guard !hold.released else { return }
+        hold.released = true
+        regularPolicyHolds -= 1
+        if regularPolicyHolds == 0 { NSApp.setActivationPolicy(policyBeforeHolds) }
+    }
 
     /// Whether macOS policy, not the user, controls `domain`'s access.
     func isRestricted(_ domain: EventKitDomain) -> Bool {
@@ -448,16 +498,7 @@ final class AppModel: ObservableObject {
         // so macOS has nothing to attach the TCC prompt to and the request returns
         // silently — which is exactly the "clicking Grant does nothing" symptom.
         // Becoming a regular app for the duration gives the prompt somewhere to go.
-        //
-        // Counted, because Grant can be pressed for both domains before the first
-        // prompt is answered: saving "the previous policy" per request made the
-        // second one save `.regular` and restore it last, leaving a Dock icon.
-        if pendingGrantRequests == 0 {
-            policyBeforeGrant = NSApp.activationPolicy()
-        }
-        pendingGrantRequests += 1
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        let hold = holdRegularPolicy()
 
         Task { @MainActor in
             // A store created before the grant can keep serving the old answer, so the
@@ -479,10 +520,7 @@ final class AppModel: ObservableObject {
                     openPrivacySettings(for: domain)
                 }
             }
-            pendingGrantRequests -= 1
-            if pendingGrantRequests == 0 {
-                NSApp.setActivationPolicy(policyBeforeGrant)
-            }
+            releaseRegularPolicy(hold)
             refreshPermissions()
         }
     }

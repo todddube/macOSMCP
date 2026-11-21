@@ -39,11 +39,8 @@ public enum EventKitAuthorization {
     /// its own store, so a store is never used without having been granted.
     public static func status(for domain: EventKitDomain) -> EKAuthorizationStatus {
         let reported = systemStatus(for: domain)
-        if reported == .notDetermined, grantedInThisProcess.contains(domain),
-           let granted = EKAuthorizationStatus(rawValue: 3) {
-            // Raw value 3 is .fullAccess on macOS 14+ and .authorized before it; see
-            // statusDescription(_:) for why the raw value rather than the case.
-            return granted
+        if reported == .notDetermined, grantedInThisProcess.contains(domain) {
+            return .fullAccess
         }
         return reported
     }
@@ -64,42 +61,36 @@ public enum EventKitAuthorization {
     public static let lookupTimeout: TimeInterval = 5
 
     /// A short word for the current status, for error messages and `doctor`.
-    ///
-    /// Mapped from the raw value rather than switched on the enum: macOS 14 added
-    /// `.fullAccess` — which reuses `.authorized`'s raw value of 3 — and
-    /// `.writeOnly`. Building against a newer SDK than the deployment target makes
-    /// any switch over the cases either non-exhaustive or a reference to symbols
-    /// the target does not have.
     public static func statusDescription(_ status: EKAuthorizationStatus) -> String {
-        switch status.rawValue {
-        case 0: return "not yet requested"
-        case 1: return "restricted by policy"
-        case 2: return "denied"
-        case 3: return "granted"
-        case 4: return "write-only"
-        default: return "unknown (\(status.rawValue))"
+        switch status {
+        case .notDetermined: return "not yet requested"
+        case .restricted: return "restricted by policy"
+        case .denied: return "denied"
+        case .fullAccess: return "granted"
+        case .writeOnly: return "write-only"
+        @unknown default: return "unknown (\(status.rawValue))"
         }
     }
 
     /// True when we can both read and write the domain.
     ///
-    /// Write-only access (macOS 14+) is deliberately insufficient: every write
-    /// tool here reads the item back so it can return its identifier.
+    /// Write-only access is deliberately insufficient: every write tool here reads
+    /// the item back so it can return its identifier.
     public static func hasFullAccess(_ status: EKAuthorizationStatus) -> Bool {
-        status.rawValue == 3
+        status == .fullAccess
     }
 
     /// True when asking can still change the answer: nothing decided yet, or
-    /// write-only access (macOS 14+), which a full-access request offers to upgrade.
-    /// A denial or a policy restriction can only be changed outside the app.
+    /// write-only access, which a full-access request offers to upgrade. A denial
+    /// or a policy restriction can only be changed outside the app.
     public static func canPrompt(_ status: EKAuthorizationStatus) -> Bool {
-        status.rawValue == 0 || status.rawValue == 4
+        status == .notDetermined || status == .writeOnly
     }
 
     /// True when a configuration profile controls the domain, so neither the user
     /// nor a prompt can grant it.
     public static func isRestricted(_ status: EKAuthorizationStatus) -> Bool {
-        status.rawValue == 1
+        status == .restricted
     }
 
     /// Request access while asking can still change it (see ``canPrompt(_:)``), then
@@ -129,7 +120,11 @@ public enum EventKitAuthorization {
         var current = systemStatus(for: domain)
         var requestError: String?
 
-        if canPrompt(current) {
+        // A store made before the user granted access (the services create theirs at
+        // launch) keeps serving the old, empty answer even once the status reads
+        // granted. Asking once on each store gives it its own grant: macOS answers a
+        // decided request at once, without a prompt.
+        if canPrompt(current) || (hasFullAccess(current) && !refreshedStores.contains(store, domain: domain)) {
             do {
                 // Logged first so a stall here explains itself in the log.
                 BridgeLog.info(
@@ -142,6 +137,14 @@ public enum EventKitAuthorization {
                     // stopped waiting: a prompt answered after a minute still counts.
                     if granted {
                         grantedInThisProcess.insert(domain)
+                        // Reset once, here, inside the de-duplicated request: callers
+                        // that joined it all wait for this, so none holds EventKit
+                        // objects across the reset, and the store is marked
+                        // refreshed before any of them can ask again.
+                        if hasFullAccess(systemStatus(for: domain)) {
+                            store.reset()
+                            refreshedStores.insert(store, domain: domain)
+                        }
                     } else {
                         grantedInThisProcess.remove(domain)
                     }
@@ -167,8 +170,8 @@ public enum EventKitAuthorization {
                         + statusDescription(systemStatus(for: domain)),
                     category: .permissions
                 )
-                // The request records its own answer in grantedInThisProcess, so
-                // one that arrives after a timeout counts too.
+                // The request records its own answer, and resets and marks the store,
+                // so one that arrives after a timeout counts too.
                 if granted { return }
             } catch let error as MacBridgeError where error.isAccessPending {
                 throw error
@@ -200,17 +203,16 @@ public enum EventKitAuthorization {
     /// nothing. Long enough to read and answer a prompt that does appear.
     public static let requestTimeout: TimeInterval = 60
 
+    /// Stores that have asked once since access was granted. See ``ensureAccess(to:store:timeout:)``.
+    fileprivate static let refreshedStores = StoreSet()
+
     /// The request waiting for an answer, per domain and store.
     private static let inFlight = InFlightRequests()
 
     private static func requestAccess(to domain: EventKitDomain, store: EKEventStore) async throws -> Bool {
-        if #available(macOS 14.0, *) {
-            switch domain {
-            case .calendar: return try await store.requestFullAccessToEvents()
-            case .reminders: return try await store.requestFullAccessToReminders()
-            }
-        } else {
-            return try await store.requestAccess(to: entityType(for: domain))
+        switch domain {
+        case .calendar: return try await store.requestFullAccessToEvents()
+        case .reminders: return try await store.requestFullAccessToReminders()
         }
     }
 }
@@ -281,5 +283,28 @@ private final class DomainSet: @unchecked Sendable {
     func contains(_ domain: EventKitDomain) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return domains.contains(domain)
+    }
+}
+
+/// Stores already refreshed after a grant, held weakly so a dropped store is forgotten.
+private final class StoreSet: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tables: [EventKitDomain: NSHashTable<EKEventStore>] = [:]
+
+    private func table(_ domain: EventKitDomain) -> NSHashTable<EKEventStore> {
+        if let t = tables[domain] { return t }
+        let t = NSHashTable<EKEventStore>(options: [.weakMemory, .objectPointerPersonality])
+        tables[domain] = t
+        return t
+    }
+
+    func insert(_ store: EKEventStore, domain: EventKitDomain) {
+        lock.lock(); defer { lock.unlock() }
+        table(domain).add(store)
+    }
+
+    func contains(_ store: EKEventStore, domain: EventKitDomain) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return table(domain).contains(store)
     }
 }

@@ -29,10 +29,13 @@ enum AboutWindow {
 
         // An accessory app is never frontmost by itself, so without activating, the
         // window would open behind whatever the user is working in.
-        if #available(macOS 14, *) {
-            NSApp.activate()
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
+        // On the screen whose menu bar was clicked, which is where the mouse is.
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        if let area = screen?.visibleFrame {
+            window.setFrameOrigin(NSPoint(x: area.midX - window.frame.width / 2,
+                                          y: area.midY - window.frame.height / 2))
         }
         window.makeKeyAndOrderFront(nil)
     }
@@ -51,7 +54,7 @@ enum AboutWindow {
         // Kept, not released: closing then reopening should not rebuild the view.
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: AboutView())
-        window.center()
+        window.isRestorable = false
         return window
     }
 }
@@ -142,14 +145,14 @@ struct AboutView: View {
         .font(.callout)
     }
 
-    /// Marketing version, plus the build number when it says something extra.
-    /// Shared with the right-click menu so both always show the same thing.
+    /// Marketing version, plus the build number when it says something extra, and
+    /// the release date. Shared with the right-click menu so both always show the same thing.
     static var versionText: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         guard let build, !build.isEmpty, build != MacBridge.version else {
-            return "Version \(MacBridge.version)"
+            return "Version \(MacBridge.versionWithDate)"
         }
-        return "Version \(MacBridge.version) (\(build))"
+        return "Version \(MacBridge.version) (\(build)) · \(MacBridge.releaseDateText)"
     }
 
     /// The open-source components MacBridge is built on, each linked to its source,

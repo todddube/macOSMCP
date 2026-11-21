@@ -3,7 +3,8 @@
 //  generate-icons.swift
 //  Tools · MacBridge
 //
-//  Draws the app icon with CoreGraphics and writes it into App/Assets.xcassets.
+//  Draws the app icon's artwork layers with CoreGraphics and writes them, with an
+//  icon.json, into the Icon Composer bundle App/AppIcon.icon.
 //
 //  Committed as code rather than as opaque binaries so the artwork is reviewable in
 //  a diff and tweakable without a design tool. No dependencies: no SVG converter or
@@ -21,13 +22,13 @@ import Foundation
 // MARK: - Output locations
 
 let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-let catalog = repoRoot.appendingPathComponent("App/Assets.xcassets")
-let appIconSet = catalog.appendingPathComponent("AppIcon.appiconset")
+let iconBundle = repoRoot.appendingPathComponent("App/AppIcon.icon")
+let iconAssets = iconBundle.appendingPathComponent("Assets")
 
 // MARK: - Drawing helpers
 
 /// A square sRGB bitmap context with premultiplied alpha. Traps on failure: this is a
-/// developer script, and a half-written icon set is worse than stopping.
+/// developer script, and a half-written icon is worse than stopping.
 func makeContext(size: Int) -> CGContext {
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
     guard let context = CGContext(
@@ -81,42 +82,37 @@ func fillGradient(_ context: CGContext, path: CGPath, colors: [CGColor], from: C
 // A Mac mini as a plinth, with a suspension bridge spanning above it: the machine
 // on one side, the assistant on the other, MacBridge as the span between.
 //
-// Composed to survive 16px. At that size it reduces to a blue tile, a pale slab and
-// a bright arc — which is still legible as "bridge over a box". Fine detail (the
-// hangers, the port, the LED) is there for 256px and up and simply disappears
-// cleanly below that rather than turning to mud.
+// The icon is LAYERED, in the Icon Composer format: the HIG asks for square,
+// unmasked layers and leaves masking, highlights, shadow and the dark, tinted and
+// clear looks to the system. So nothing here is masked, shadowed or highlighted:
+//   - background: a gradient fill declared in icon.json, not an image;
+//   - "Mac mini" group: one 1024px transparent layer;
+//   - "Bridge" group: two layers, cables (with hangers) and structure (towers, deck).
+// Each layer is a full-canvas transparent PNG, so every layer shares one coordinate
+// space and icon.json needs no per-layer offsets.
 
-/// The app icon at `size` pixels square.
-func drawAppIcon(size: Int) -> CGContext {
-    let context = makeContext(size: size)
-    let s = CGFloat(size)
-    func u(_ fraction: CGFloat) -> CGFloat { fraction * s }
+/// Canvas edge for every layer, in pixels.
+let layerSize = 1024
 
-    // macOS icons sit inset inside their canvas rather than filling it.
-    let plate = CGRect(x: u(0.0977), y: u(0.0977), width: u(0.8047), height: u(0.8047))
-    let plateRadius = u(0.1836)
+/// Shared geometry. The system supplies the margin and the squircle, so the artwork
+/// is kept inside a centred 80% box.
+struct Geometry {
+    let s = CGFloat(layerSize)
+    var plate: CGRect { CGRect(x: s * 0.10, y: s * 0.10, width: s * 0.80, height: s * 0.80) }
+    var lineWidth: CGFloat { s * 0.020 }
+    var deckY: CGFloat { plate.minY + plate.height * 0.52 }
+    var leftX: CGFloat { plate.minX + plate.width * 0.10 }
+    var rightX: CGFloat { plate.maxX - plate.width * 0.10 }
+    var towerTop: CGFloat { plate.minY + plate.height * 0.84 }
+    var towerLeftX: CGFloat { plate.minX + plate.width * 0.30 }
+    var towerRightX: CGFloat { plate.maxX - plate.width * 0.30 }
+}
 
-    // Night-sky blue: reads as "system utility" and keeps the white bridge bright.
-    fillGradient(
-        context,
-        path: roundedRect(plate, radius: plateRadius),
-        colors: [rgb(38, 92, 168), rgb(16, 38, 82)],
-        from: CGPoint(x: plate.minX, y: plate.maxY),
-        to: CGPoint(x: plate.maxX, y: plate.minY)
-    )
-
-    // A soft highlight across the top so the tile is not flat.
-    fillGradient(
-        context,
-        path: roundedRect(plate, radius: plateRadius),
-        colors: [rgb(255, 255, 255, 0.16), rgb(255, 255, 255, 0)],
-        from: CGPoint(x: plate.midX, y: plate.maxY),
-        to: CGPoint(x: plate.midX, y: plate.midY)
-    )
-
-    // ── Mac mini ────────────────────────────────────────────────────────────
-    // Straight-on with a visible top face: a flat square slab, which is what the
-    // machine actually looks like and what reads at small sizes.
+/// The Mac mini slab: aluminium body, darker top face, LED and port. No shadow;
+/// the system casts one for the group.
+func drawMini(_ g: Geometry) -> CGContext {
+    let context = makeContext(size: layerSize)
+    let plate = g.plate
     let miniWidth = plate.width * 0.62
     let miniHeight = plate.height * 0.20
     let mini = CGRect(
@@ -127,16 +123,6 @@ func drawAppIcon(size: Int) -> CGContext {
     )
     let miniRadius = miniHeight * 0.30
 
-    // Drop shadow grounds it on the tile.
-    context.saveGState()
-    context.setShadow(offset: CGSize(width: 0, height: -u(0.012)), blur: u(0.03),
-                      color: rgb(0, 0, 0, 0.45))
-    context.addPath(roundedRect(mini, radius: miniRadius))
-    context.setFillColor(rgb(214, 218, 224))
-    context.fillPath()
-    context.restoreGState()
-
-    // Body: brushed aluminium, lighter at the top.
     fillGradient(
         context,
         path: roundedRect(mini, radius: miniRadius),
@@ -145,7 +131,7 @@ func drawAppIcon(size: Int) -> CGContext {
         to: CGPoint(x: mini.midX, y: mini.minY)
     )
 
-    // The darker top face, which is what makes it read as a slab rather than a bar.
+    // The darker top face, which makes it read as a slab rather than a bar.
     let topFace = CGRect(x: mini.minX, y: mini.maxY - miniHeight * 0.30,
                          width: mini.width, height: miniHeight * 0.30)
     context.saveGState()
@@ -160,139 +146,141 @@ func drawAppIcon(size: Int) -> CGContext {
     )
     context.restoreGState()
 
-    // Detail that only matters at large sizes: the power LED and a rear port.
-    if size >= 128 {
-        let led = CGRect(x: mini.maxX - mini.width * 0.10,
-                         y: mini.minY + miniHeight * 0.30,
-                         width: miniHeight * 0.13, height: miniHeight * 0.13)
-        context.setFillColor(rgb(150, 235, 160))
-        context.fillEllipse(in: led)
+    let led = CGRect(x: mini.maxX - mini.width * 0.10,
+                     y: mini.minY + miniHeight * 0.30,
+                     width: miniHeight * 0.13, height: miniHeight * 0.13)
+    context.setFillColor(rgb(150, 235, 160))
+    context.fillEllipse(in: led)
 
-        let port = CGRect(x: mini.minX + mini.width * 0.08,
-                          y: mini.minY + miniHeight * 0.30,
-                          width: mini.width * 0.14, height: miniHeight * 0.12)
-        context.setFillColor(rgb(90, 98, 110, 0.7))
-        context.addPath(roundedRect(port, radius: port.height / 2))
-        context.fillPath()
-    }
+    let port = CGRect(x: mini.minX + mini.width * 0.08,
+                      y: mini.minY + miniHeight * 0.30,
+                      width: mini.width * 0.14, height: miniHeight * 0.12)
+    context.setFillColor(rgb(90, 98, 110, 0.7))
+    context.addPath(roundedRect(port, radius: port.height / 2))
+    context.fillPath()
+    return context
+}
 
-    // ── Suspension bridge ───────────────────────────────────────────────────
-    let deckY = plate.minY + plate.height * 0.52
-    let spanInset = plate.width * 0.10
-    let leftX = plate.minX + spanInset
-    let rightX = plate.maxX - spanInset
-    let towerTop = plate.minY + plate.height * 0.84
-    let towerLeftX = plate.minX + plate.width * 0.30
-    let towerRightX = plate.maxX - plate.width * 0.30
-
-    let lineWidth = max(s * 0.016, 1)
+/// Main cables and hangers, in warm gold. The hangers are drawn heavier than a flat
+/// icon would need: the system's glass and tinted looks erase hairlines.
+func drawCables(_ g: Geometry) -> CGContext {
+    let context = makeContext(size: layerSize)
     context.setLineCap(.round)
     context.setLineJoin(.round)
-
-    // Cables first, so the towers and deck sit over them.
     context.setStrokeColor(rgb(255, 214, 120))
-    context.setLineWidth(lineWidth * 0.85)
-    for (startX, endX) in [(leftX, towerLeftX), (towerLeftX, towerRightX), (towerRightX, rightX)] {
+
+    context.setLineWidth(g.lineWidth * 0.85)
+    for (startX, endX) in [(g.leftX, g.towerLeftX), (g.towerLeftX, g.towerRightX), (g.towerRightX, g.rightX)] {
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: startX, y: startX == leftX ? deckY : towerTop))
+        path.move(to: CGPoint(x: startX, y: startX == g.leftX ? g.deckY : g.towerTop))
         // A catenary, approximated by a quadratic through the low point.
         let sag = (endX - startX) * 0.28
         path.addQuadCurve(
-            to: CGPoint(x: endX, y: endX == rightX ? deckY : towerTop),
-            control: CGPoint(x: (startX + endX) / 2, y: min(deckY, towerTop) + sag * 0.25)
+            to: CGPoint(x: endX, y: endX == g.rightX ? g.deckY : g.towerTop),
+            control: CGPoint(x: (startX + endX) / 2, y: min(g.deckY, g.towerTop) + sag * 0.25)
         )
         context.addPath(path)
         context.strokePath()
     }
 
-    // Hangers: fine verticals from cable to deck. Large sizes only.
-    if size >= 256 {
-        context.setStrokeColor(rgb(255, 214, 120, 0.8))
-        context.setLineWidth(lineWidth * 0.35)
-        let steps = 9
-        for i in 1..<steps {
-            let t = CGFloat(i) / CGFloat(steps)
-            let x = towerLeftX + (towerRightX - towerLeftX) * t
-            // Height of the quadratic cable at t between the two towers.
-            let sag = (towerRightX - towerLeftX) * 0.28
-            let control = towerTop + sag * 0.25 - (towerTop - deckY) * 0.55
-            let y = pow(1 - t, 2) * towerTop + 2 * (1 - t) * t * control + pow(t, 2) * towerTop
-            context.move(to: CGPoint(x: x, y: y))
-            context.addLine(to: CGPoint(x: x, y: deckY))
-            context.strokePath()
-        }
-    }
-
-    // Towers.
-    context.setStrokeColor(rgb(255, 255, 255))
-    context.setLineWidth(lineWidth)
-    for x in [towerLeftX, towerRightX] {
-        context.move(to: CGPoint(x: x, y: deckY - plate.height * 0.06))
-        context.addLine(to: CGPoint(x: x, y: towerTop))
+    context.setLineWidth(g.lineWidth * 0.5)
+    let steps = 9
+    for i in 1..<steps {
+        let t = CGFloat(i) / CGFloat(steps)
+        let x = g.towerLeftX + (g.towerRightX - g.towerLeftX) * t
+        let sag = (g.towerRightX - g.towerLeftX) * 0.28
+        let control = g.towerTop + sag * 0.25 - (g.towerTop - g.deckY) * 0.55
+        let y = pow(1 - t, 2) * g.towerTop + 2 * (1 - t) * t * control + pow(t, 2) * g.towerTop
+        context.move(to: CGPoint(x: x, y: y))
+        context.addLine(to: CGPoint(x: x, y: g.deckY))
         context.strokePath()
     }
-
-    // Deck: the strongest horizontal, and the line that carries the shape at 16px.
-    context.setLineWidth(lineWidth * 1.5)
-    context.move(to: CGPoint(x: leftX, y: deckY))
-    context.addLine(to: CGPoint(x: rightX, y: deckY))
-    context.strokePath()
-
     return context
 }
 
-// MARK: - Asset catalog
-
-/// One entry per required macOS app-icon size, as `idiom: mac` expects.
-let appIconSizes: [(points: Int, scale: Int)] = [
-    (16, 1), (16, 2), (32, 1), (32, 2), (128, 1), (128, 2), (256, 1), (256, 2), (512, 1), (512, 2),
-]
-
-/// Write every app-icon PNG and the set's `Contents.json`.
-func generateAppIcon() {
-    var images: [String] = []
-    for (points, scale) in appIconSizes {
-        let pixels = points * scale
-        let name = "icon_\(points)x\(points)\(scale == 2 ? "@2x" : "").png"
-        write(drawAppIcon(size: pixels), to: appIconSet.appendingPathComponent(name))
-        images.append("""
-                {
-                  "filename" : "\(name)",
-                  "idiom" : "mac",
-                  "scale" : "\(scale)x",
-                  "size" : "\(points)x\(points)"
-                }
-            """)
+/// Towers and deck, in white: the line that carries the shape at 16px.
+func drawStructure(_ g: Geometry) -> CGContext {
+    let context = makeContext(size: layerSize)
+    context.setLineCap(.round)
+    context.setStrokeColor(rgb(255, 255, 255))
+    context.setLineWidth(g.lineWidth)
+    for x in [g.towerLeftX, g.towerRightX] {
+        context.move(to: CGPoint(x: x, y: g.deckY - g.plate.height * 0.06))
+        context.addLine(to: CGPoint(x: x, y: g.towerTop))
+        context.strokePath()
     }
+    context.setLineWidth(g.lineWidth * 1.5)
+    context.move(to: CGPoint(x: g.leftX, y: g.deckY))
+    context.addLine(to: CGPoint(x: g.rightX, y: g.deckY))
+    context.strokePath()
+    return context
+}
 
-    let contents = """
-        {
-          "images" : [
-        \(images.joined(separator: ",\n"))
-          ],
-          "info" : {
-            "author" : "generate-icons.swift",
-            "version" : 1
-          }
+// MARK: - Icon Composer bundle
+//
+// Format learned from Xcode's own "Icon Composer Icon" file template
+// (Xcode.app/.../Templates/File Templates/macOS/Resource) and the key names in
+// Icon Composer's frameworks, then checked by rendering with `ictool`.
+
+/// icon.json: a night-sky gradient fill, with glass and specular on the artwork so the
+/// system lights it. There is deliberately no dark fill specialization: ictool ignored
+/// one, and the system's own dark treatment (near-black tile, artwork kept) reads well. Groups are listed top-down, so the
+/// bridge sits over the Mac mini.
+let iconJSON = """
+    {
+      "fill" : {
+        "linear-gradient" : [
+          "srgb:0.14902,0.36078,0.65882,1.00000",
+          "srgb:0.06275,0.14902,0.32157,1.00000"
+        ],
+        "orientation" : {
+          "start" : { "x" : 0.1, "y" : 0 },
+          "stop" : { "x" : 0.9, "y" : 1 }
         }
-        """
-    try! contents.write(to: appIconSet.appendingPathComponent("Contents.json"),
+      },
+      "groups" : [
+        {
+          "name" : "Bridge",
+          "layers" : [
+            { "name" : "Structure", "image-name" : "bridge-structure.png", "glass" : true },
+            { "name" : "Cables", "image-name" : "bridge-cables.png", "glass" : false }
+          ],
+          "lighting" : "individual",
+          "shadow" : { "kind" : "layer-color", "opacity" : 0.4 },
+          "specular" : true,
+          "translucency" : { "enabled" : false, "value" : 0.5 }
+        },
+        {
+          "name" : "Mac mini",
+          "layers" : [
+            { "name" : "Mac mini", "image-name" : "mac-mini.png", "glass" : true }
+          ],
+          "lighting" : "combined",
+          "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+          "specular" : true,
+          "translucency" : { "enabled" : false, "value" : 0.5 }
+        }
+      ],
+      "supported-platforms" : {
+        "squares" : [ "macOS" ]
+      }
+    }
+    """
+
+/// Write the layers and icon.json, replacing any previous bundle.
+func generateAppIcon() {
+    let g = Geometry()
+    try? FileManager.default.removeItem(at: iconBundle)
+    write(drawMini(g), to: iconAssets.appendingPathComponent("mac-mini.png"))
+    write(drawCables(g), to: iconAssets.appendingPathComponent("bridge-cables.png"))
+    write(drawStructure(g), to: iconAssets.appendingPathComponent("bridge-structure.png"))
+    try! iconJSON.write(to: iconBundle.appendingPathComponent("icon.json"),
                         atomically: true, encoding: .utf8)
-    print("  AppIcon.appiconset — \(appIconSizes.count) images")
+    print("  AppIcon.icon — 3 layers, \(layerSize)px")
 }
 
 // MARK: - Main
 
-try? FileManager.default.createDirectory(at: catalog, withIntermediateDirectories: true)
-try! """
-    {
-      "info" : {
-        "author" : "generate-icons.swift",
-        "version" : 1
-      }
-    }
-    """.write(to: catalog.appendingPathComponent("Contents.json"), atomically: true, encoding: .utf8)
-
-print("Generating icons into App/Assets.xcassets")
+print("Generating App/AppIcon.icon")
 generateAppIcon()
 print("Done.")

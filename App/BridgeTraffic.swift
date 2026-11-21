@@ -8,6 +8,7 @@
 //
 
 import AppKit
+import MacBridgeKit
 import SwiftUI
 
 /// Tool calls drawn as cars crossing the bridge.
@@ -166,22 +167,33 @@ final class BridgeTraffic: ObservableObject {
 
     // MARK: Rendering
 
-    /// The menu-bar frame: the bridge in the menu bar's own text colour (white on a
-    /// dark bar), with the panel's coloured cars.
+    /// The menu-bar frame.
     ///
-    /// Not a template image, because a template can't carry colour. The palette is
-    /// resolved inside the drawing handler, which AppKit runs, and caches, once per
-    /// appearance it's drawn in, so the bridge follows the menu bar's own appearance
-    /// rather than the system's: seen drawing a light road on a dark, wallpaper-tinted
-    /// bar while the system was in Light Mode.
-    func menuBarImage(alert: Bool) -> NSImage {
+    /// While the bridge is quiet and healthy this is a template image, the bridge
+    /// alone, so the system tints it for the menu bar (light, dark, selected or
+    /// wallpaper-tinted). Colour is used only when it carries meaning: cars crossing,
+    /// an alert, or a client in trouble. That image isn't a template, because a
+    /// template can't carry colour, and its palette is resolved inside the drawing
+    /// handler, which AppKit runs, and caches, once per appearance it's drawn in, so
+    /// the bridge follows the menu bar's own appearance rather than the system's:
+    /// seen drawing a light road on a dark, wallpaper-tinted bar while the system was
+    /// in Light Mode.
+    ///
+    /// - Parameter dots: One level per known client, drawn under the bridge. A
+    ///   connected client is a filled dot even in the template; the other levels
+    ///   only show in the colour image, which a warning or problem triggers.
+    func menuBarImage(alert: Bool, dots: [ClientHealth.Level]) -> NSImage {
         let snapshot = snapshot
+        let needsColour = alert || isActive || dots.contains { $0 == .warning || $0 == .problem }
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
             guard let cg = NSGraphicsContext.current?.cgContext else { return false }
-            BridgeRenderer.draw(cg, in: rect, snapshot: snapshot, palette: .menuBar, alert: alert)
+            BridgeRenderer.draw(
+                cg, in: rect, snapshot: snapshot,
+                palette: needsColour ? .menuBar : .menuBarTemplate, alert: alert, dots: dots
+            )
             return true
         }
-        image.isTemplate = false
+        image.isTemplate = !needsColour
         return image
     }
 }
@@ -258,6 +270,11 @@ enum BridgeRenderer {
         var showsNode: Bool
         /// How strongly ambient cars draw, so real calls stand out from the traffic.
         var ambientAlpha: CGFloat
+        /// Fills the gap an alert cuts in the deck; nil leaves the gap empty.
+        var alertBadge: CGColor?
+        /// Colours the client dots by health. False for the template, which can only
+        /// say connected (filled) or not (absent).
+        var colouredDots: Bool
 
         /// The menu bar: the whole bridge in the menu bar's text colour, so it reads
         /// white on a dark bar and black on a light one, with only the cars in colour.
@@ -272,7 +289,26 @@ enum BridgeRenderer {
                 failed: NSColor.systemRed.cgColor,
                 accent: NSColor.systemGreen.cgColor,
                 showsNode: false,
-                ambientAlpha: 0.6
+                ambientAlpha: 0.6,
+                alertBadge: NSColor.systemOrange.cgColor,
+                colouredDots: true
+            )
+        }
+
+        /// The idle menu bar: one opaque colour, since only the alpha of a template
+        /// image is used.
+        static var menuBarTemplate: Palette {
+            Palette(
+                structure: NSColor.black.cgColor,
+                read: NSColor.black.cgColor,
+                write: NSColor.black.cgColor,
+                destructive: NSColor.black.cgColor,
+                failed: NSColor.black.cgColor,
+                accent: NSColor.black.cgColor,
+                showsNode: false,
+                ambientAlpha: 1,
+                alertBadge: nil,
+                colouredDots: false
             )
         }
 
@@ -285,7 +321,9 @@ enum BridgeRenderer {
                 failed: NSColor.systemRed.cgColor,
                 accent: NSColor.systemGreen.cgColor,
                 showsNode: true,
-                ambientAlpha: 0.45
+                ambientAlpha: 0.45,
+                alertBadge: nil,
+                colouredDots: true
             )
         }
 
@@ -301,7 +339,7 @@ enum BridgeRenderer {
     /// Draw the glyph, its traffic and any pulse for one frame into `cg`.
     static func draw(
         _ cg: CGContext, in rect: CGRect, snapshot: BridgeTraffic.Snapshot,
-        palette: Palette, alert: Bool
+        palette: Palette, alert: Bool, dots: [ClientHealth.Level] = []
     ) {
         let glyph = BridgeGlyph(in: rect)
         cg.saveGState()
@@ -311,6 +349,37 @@ enum BridgeRenderer {
         drawPulse(cg, glyph: glyph, snapshot: snapshot, palette: palette)
         for packet in snapshot.packets {
             drawCar(cg, glyph: glyph, packet: packet, snapshot: snapshot, palette: palette)
+        }
+        drawDots(cg, in: rect, levels: dots, palette: palette)
+    }
+
+    // MARK: Client dots
+
+    private static let dotDiameter: CGFloat = 4
+    private static let dotGap: CGFloat = 4
+
+    /// One dot per client, centred along the bottom edge below the deck. Green is
+    /// connected or on standby, yellow needs a look, red can't serve calls; a client
+    /// that isn't installed gets none. In the template only connected clients show.
+    private static func drawDots(
+        _ cg: CGContext, in rect: CGRect, levels: [ClientHealth.Level], palette: Palette
+    ) {
+        let shown = levels.filter { $0 != .absent && (palette.colouredDots || $0 == .good) }
+        guard !shown.isEmpty else { return }
+        let count = CGFloat(shown.count)
+        let total = count * dotDiameter + (count - 1) * dotGap
+        var x = rect.midX - total / 2 + dotDiameter / 2
+        for level in shown {
+            let color: CGColor
+            switch level {
+            case .good, .standby: color = palette.colouredDots ? NSColor.systemGreen.cgColor : palette.structure
+            case .warning: color = NSColor.systemYellow.cgColor
+            case .problem: color = NSColor.systemRed.cgColor
+            case .absent: continue
+            }
+            fillCircle(cg, at: CGPoint(x: x, y: rect.minY + 1.5 + dotDiameter / 2),
+                       radius: dotDiameter / 2, color: color)
+            x += dotDiameter + dotGap
         }
     }
 
@@ -356,6 +425,9 @@ enum BridgeRenderer {
             cg.fill(CGRect(x: g.box.midX - g.stroke * 1.3, y: g.deckY - g.stroke * 1.4,
                            width: g.stroke * 2.6, height: g.stroke * 2.8))
             cg.setBlendMode(.normal)
+            if let badge = palette.alertBadge {
+                fillCircle(cg, at: CGPoint(x: g.box.midX, y: g.deckY), radius: g.stroke * 1.1, color: badge)
+            }
         }
     }
 
@@ -474,8 +546,8 @@ struct BridgeTrafficView: View {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let count = traffic.callsInLastMinute(at: context.date)
                 Text(count == 0 ? "quiet" : "\(count) call\(count == 1 ? "" : "s") in the last minute")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                     .offset(y: 10)
             }
         }
@@ -491,10 +563,11 @@ struct BridgeTrafficView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
             Text(text)
-                .font(.system(size: 9))
+                .font(.caption2)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
         }
-        .frame(width: 58)
+        .frame(width: 72)
     }
 }

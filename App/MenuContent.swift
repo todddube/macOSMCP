@@ -2,7 +2,7 @@
 //  MenuContent.swift
 //  MacBridge (app) · MacBridge
 //
-//  The menu-bar panel: status, permissions, clients, activity, diagnostics.
+//  The menu-bar panel: status, permissions, client setup, clients and activity.
 //
 //  Copyright © 2026 Todd Dube. Licensed under the MIT License; see LICENSE.
 //
@@ -11,7 +11,8 @@ import MacBridgeKit
 import SwiftUI
 
 /// The menu-bar panel: whether the bridge is up, what is granted, who is
-/// connected, and what they just did.
+/// connected, and what they just did. Policy, launch at login and diagnostics live in
+/// Settings.
 struct MenuContent: View {
     @ObservedObject var model: AppModel
     /// Observed separately: `AppModel.log` is itself an ObservableObject, and a
@@ -19,17 +20,47 @@ struct MenuContent: View {
     /// would leave the activity list frozen.
     @ObservedObject var log: ActivityLog
     @ObservedObject var traffic: BridgeTraffic
+    let settings: SettingsOpener
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The content's natural height, so the scroll view can be exactly as tall as
+    /// the content until it hits the cap.
+    @State private var contentHeight: CGFloat = 0
+
+    /// The tallest the panel may be: the menu-bar screen's usable height, less room
+    /// for the menu bar's shadow and a margin, so it never runs off a small display.
+    private var maxHeight: CGFloat {
+        let screen = NSScreen.screens.first ?? NSScreen.main
+        return (screen?.visibleFrame.height ?? 800) - 80
+    }
 
     var body: some View {
+        ScrollView {
+            content
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: ContentHeightKey.self, value: proxy.size.height)
+                })
+        }
+        .frame(width: 380, height: contentHeight > 0 ? min(contentHeight, maxHeight) : nil)
+        .frame(maxHeight: maxHeight)
+        .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
+        // Permissions can change in System Settings while the panel is closed, so
+        // each opening re-reads them. The read is cheap.
+        .onAppear { model.refreshPermissions() }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             if let other = model.runningCopyMismatch {
                 copyMismatchWarning(other)
             }
+            if model.policy.readOnly {
+                StatusNote(symbol: "lock.fill", tint: .orange,
+                           text: "Read-only: clients can't change your calendars or reminders.")
+            }
             Divider()
             permissions
-            Divider()
-            safety
             Divider()
             setup
             Divider()
@@ -41,22 +72,22 @@ struct MenuContent: View {
         }
         .padding(12)
         .frame(width: 380)
-        // Permissions and login items can both change in System Settings while the
-        // panel is closed, so each opening re-reads them. Both reads are cheap.
-        .onAppear {
-            model.refreshPermissions()
-            model.refreshLaunchAtLogin()
-        }
     }
 
-    /// A section's small caps title, read by VoiceOver as a heading so the panel
-    /// can be navigated section by section.
+    /// A section's title, read by VoiceOver as a heading so the panel can be
+    /// navigated section by section.
     private func sectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
             .accessibilityAddTraits(.isHeader)
-            .accessibilityLabel(title)
+    }
+
+    /// A status symbol that cross-fades when it changes, unless Reduce Motion is on.
+    private func statusSymbol(_ name: String, tint: Color) -> some View {
+        Image(systemName: name)
+            .foregroundStyle(tint)
+            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+            .accessibilityHidden(true)
     }
 
     // MARK: Header
@@ -70,6 +101,7 @@ struct MenuContent: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("MacBridge \(MacBridge.version)")
                     .font(.headline)
+                    .help("Released \(MacBridge.releaseDateText)")
                 Text(statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -94,7 +126,7 @@ struct MenuContent: View {
             ForEach(model.clientHealth.filter { $0.health.level != .absent }, id: \.client.id) { entry in
                 HStack(spacing: 3) {
                     Circle()
-                        .fill(Color(nsColor: StatusDotsView.color(for: entry.health.level)))
+                        .fill(Color(nsColor: StatusDots.color(for: entry.health.level)))
                         .frame(width: 6, height: 6)
                     Text(entry.client.name.replacingOccurrences(of: "Claude ", with: ""))
                         .font(.caption2)
@@ -125,7 +157,7 @@ struct MenuContent: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(otherPath)
-                .font(.system(size: 9, design: .monospaced))
+                .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -167,9 +199,8 @@ struct MenuContent: View {
                     // An HStack, not a Group: a Group's modifiers apply to each child
                     // separately, so .combine on it would merge nothing.
                     HStack(spacing: 6) {
-                        Image(systemName: model.hasAccess(domain) ? "checkmark.circle.fill" : "exclamationmark.circle")
-                            .foregroundStyle(model.hasAccess(domain) ? .green : .orange)
-                            .accessibilityHidden(true)
+                        statusSymbol(model.hasAccess(domain) ? "checkmark.circle.fill" : "exclamationmark.circle",
+                                     tint: model.hasAccess(domain) ? .green : .orange)
                         Text(domain.displayName)
                         Text(model.isRestricted(domain) ? "managed by your organization" : model.statusText(domain))
                             .font(.caption)
@@ -188,33 +219,6 @@ struct MenuContent: View {
         }
     }
 
-    // MARK: Safety
-
-    /// What connected clients may do. Read-only covers every write; asking before
-    /// deleting covers the three tools that can't be undone.
-    private var safety: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            sectionTitle("Safety")
-
-            Toggle("Read-only", isOn: $model.policy.readOnly)
-                .toggleStyle(.checkbox)
-            Text(model.policy.readOnly
-                 ? "Clients can read your calendars and reminders but not change them."
-                 : "Clients can add, change and complete items.")
-                .font(.caption2)
-                .foregroundStyle(model.policy.readOnly ? .orange : .secondary)
-                .padding(.leading, 20)
-
-            Toggle("Ask before deleting", isOn: $model.policy.confirmDestructive)
-                .toggleStyle(.checkbox)
-                .disabled(model.policy.readOnly)
-            Text("Deleting an event, reminder or list waits for you to allow it.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 20)
-        }
-    }
-
     // MARK: Setup
 
     /// What the user has to do for any of this to be useful.
@@ -227,16 +231,14 @@ struct MenuContent: View {
             HStack {
                 sectionTitle("Client Setup")
                 Spacer()
-                Button("Re-check") { model.refreshClientSetup() }
+                Button("Check Again") { model.refreshClientSetup() }
                     .buttonStyle(.link)
                     .font(.caption2)
             }
 
             if !model.hasConfiguredClient {
-                Text("No AI client is pointed at MacBridge yet, so nothing can use it. Add it to one below.")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                StatusNote(symbol: "exclamationmark.triangle.fill", tint: .orange, font: .caption,
+                           text: "No AI client is pointed at MacBridge yet, so nothing can use it. Add it to one below.")
             }
 
             ForEach(model.clientSetup) { client in
@@ -249,9 +251,7 @@ struct MenuContent: View {
     private func clientSetupRow(_ client: ClientSetup) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Image(systemName: icon(for: client.status))
-                    .foregroundStyle(tint(for: client.status))
-                    .accessibilityHidden(true)
+                statusSymbol(icon(for: client.status), tint: tint(for: client.status))
                 Text(client.name)
                 Spacer()
                 Text(label(for: client.status))
@@ -266,10 +266,7 @@ struct MenuContent: View {
                     // Keep the "restart Claude Desktop" reminder visible after Connect,
                     // since the row flips to ready the moment the config is written.
                     if let result = model.setupResult, result.clientID == client.id, !result.isError {
-                        Text(result.message)
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                            .fixedSize(horizontal: false, vertical: true)
+                        StatusNote(symbol: "checkmark.circle.fill", tint: .green, text: result.message)
                     }
                     Spacer()
                     if model.connectingClientID == client.id {
@@ -290,11 +287,10 @@ struct MenuContent: View {
             case .pointsElsewhere(let command):
                 // Almost always a config left over from a DerivedData build, which
                 // fails only when the user next tries to use it.
-                Text("Configured, but pointing at another copy:")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
+                StatusNote(symbol: "exclamationmark.triangle.fill", tint: .orange,
+                           text: "Configured, but pointing at another copy:")
                 Text(command)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -321,7 +317,7 @@ struct MenuContent: View {
                 ProgressView().controlSize(.mini)
             }
             Spacer()
-            Menu("Manual setup") {
+            Menu("Manual Setup") {
                 if client.id == "claude-code" {
                     Button("Copy Terminal Command") { model.copyClaudeCodeCommand() }
                 }
@@ -334,10 +330,8 @@ struct MenuContent: View {
         }
 
         if let result = model.setupResult, result.clientID == client.id {
-            Text(result.message)
-                .font(.caption2)
-                .foregroundStyle(result.isError ? .orange : .green)
-                .fixedSize(horizontal: false, vertical: true)
+            StatusNote(symbol: result.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
+                       tint: result.isError ? .orange : .green, text: result.message)
                 .textSelection(.enabled)
         }
     }
@@ -376,7 +370,7 @@ struct MenuContent: View {
             HStack {
                 sectionTitle("Connected Clients")
                 Spacer()
-                Text("\(log.clients.count)")
+                Text("\(log.clientGroups.count)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -386,16 +380,20 @@ struct MenuContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(log.clients) { client in
+                ForEach(log.clientGroups) { group in
                     HStack(spacing: 6) {
                         Circle().fill(.green).frame(width: 6, height: 6)
                             .accessibilityHidden(true)
-                        Text(client.displayName)
+                        Text(group.title)
                         Spacer()
-                        // This row is where per-client allow/deny will live.
-                        Text("pid \(client.pid)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        // This row is where per-client allow/deny will live. The
+                        // connection's pid is the macbridge shim's, not the client's,
+                        // so the version is shown instead.
+                        if let version = group.sessions.first?.version, !version.isEmpty {
+                            Text(version)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .accessibilityElement(children: .combine)
                 }
@@ -417,8 +415,7 @@ struct MenuContent: View {
             BridgeTrafficView(
                 traffic: traffic,
                 alert: !model.state.isListening,
-                client: log.clients.count == 1 ? log.clients[0].displayName
-                    : log.clients.isEmpty ? nil : "\(log.clients.count) clients"
+                client: log.trafficLabel
             )
 
             if rows.isEmpty {
@@ -429,11 +426,13 @@ struct MenuContent: View {
                 ForEach(rows) { entry in
                     HStack(spacing: 6) {
                         Text(entry.timeText)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(.secondary)
+                        if !entry.ok {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                        }
                         Text(entry.tool)
                             .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(entry.ok ? Color.primary : Color.red)
                             .lineLimit(1)
                         if entry.repeatCount > 1 {
                             Text("×\(entry.repeatCount)")
@@ -446,7 +445,7 @@ struct MenuContent: View {
                             // the whole message is a hover away.
                             Text(detail)
                                 .font(.caption2)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         } else if let summary = entry.summary {
@@ -466,7 +465,7 @@ struct MenuContent: View {
                     Text("\(log.totalCalls) calls total"
                         + (log.failedCalls > 0 ? ", \(log.failedCalls) failed" : ""))
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -493,7 +492,7 @@ struct MenuContent: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(model.shimPath)
-                .font(.system(size: 9, design: .monospaced))
+                .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .lineLimit(1)
@@ -501,38 +500,10 @@ struct MenuContent: View {
 
             Divider()
 
-            sectionTitle("Diagnostics")
-            HStack(spacing: 6) {
-                Button("Open Log") { model.openLog() }
-                    .controlSize(.small)
-                Button("Copy Diagnostics") { model.copyDiagnostics() }
-                    .controlSize(.small)
-                Button("Refresh") { model.refreshEverything() }
-                    .controlSize(.small)
-            }
-
-            HStack(spacing: 6) {
-                // Restarting the bridge is the cheap fix for a wedged connection;
-                // connected clients reconnect on their next call, so it is safe.
-                Button("Restart Bridge") { model.restartBridge() }
-                    .controlSize(.small)
-                Button("Relaunch App") { model.relaunchApp() }
-                    .controlSize(.small)
-                Spacer()
-            }
-            Text("Restart Bridge rebinds the socket. Relaunch also picks up permission changes.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Divider()
-
-            launchAtLogin
-
-            Divider()
-
             HStack {
                 Button("About MacBridge") { AboutWindow.show() }
+                    .controlSize(.small)
+                Button("Settings…") { settings.open() }
                     .controlSize(.small)
                 Spacer()
                 Button("Quit MacBridge") { NSApplication.shared.terminate(nil) }
@@ -540,43 +511,33 @@ struct MenuContent: View {
             }
         }
     }
+}
 
-    // MARK: Launch at login
+/// An icon and a note: the colour is on the symbol, and the text stays in a
+/// legible label colour.
+struct StatusNote: View {
+    let symbol: String
+    let tint: Color
+    var font: Font = .caption2
+    let text: String
 
-    /// The "Open at login" checkbox. Its value is what macOS has on record, not a
-    /// stored preference, so switching it off in System Settings unticks it here.
-    private var launchAtLogin: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle("Open MacBridge at login", isOn: Binding(
-                get: { model.launchAtLogin != .disabled },
-                set: { model.setLaunchAtLogin($0) }
-            ))
-            .toggleStyle(.checkbox)
-            .controlSize(.small)
-            .disabled(!LaunchAtLogin.isAvailable)
-
-            if !LaunchAtLogin.isAvailable {
-                Text("Available once MacBridge is in your Applications folder.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else if model.launchAtLogin == .requiresApproval {
-                HStack(spacing: 6) {
-                    Text("Switched off in System Settings.")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                    Button("Open Login Items…") { LaunchAtLogin.openSystemSettings() }
-                        .controlSize(.small)
-                }
-            } else if let error = model.launchAtLoginError {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text("Keeps the bridge ready for your AI clients after a restart.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: symbol)
+                .foregroundStyle(tint)
+                .font(font)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(font)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .combine)
     }
+}
+
+/// The panel content's height, reported up so the scroll view can size to it.
+private struct ContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }

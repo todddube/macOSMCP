@@ -13,8 +13,8 @@ import MCP
 
 /// Listens on the Unix socket and serves tool calls to connected shims.
 ///
-/// Lives in the app, which is what keeps TCC, the activity log and eventually
-/// consent in one place the user can see, rather than in whichever CLI process a
+/// Lives in the app, which is what keeps TCC, the activity log and the access
+/// policy in one place the user can see, rather than in whichever CLI process a
 /// client happened to spawn.
 public final class BridgeServer: @unchecked Sendable {
 
@@ -55,7 +55,6 @@ public final class BridgeServer: @unchecked Sendable {
     private let stateLock = NSLock()
     private var listenFD: Int32 = -1
     private var running = false
-    private var clients: [UUID: ClientIdentity] = [:]
     /// Every open connection, so ``stop()`` can end them; guarded by `stateLock`.
     private var connectionFDs: Set<Int32> = []
     /// Signalled when the accept loop returns, so ``stop()`` can wait for it.
@@ -73,13 +72,6 @@ public final class BridgeServer: @unchecked Sendable {
         self.socketURL = socketURL
         self.authorize = authorize ?? { _, _ in nil }
         self.observe = observe ?? { _ in }
-    }
-
-    /// Clients currently attached, for display.
-    public var connectedClients: [ClientIdentity] {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return clients.values.sorted { $0.connectedAt < $1.connectedAt }
     }
 
     // MARK: Lifecycle
@@ -172,7 +164,6 @@ public final class BridgeServer: @unchecked Sendable {
         running = false
         let fd = listenFD
         listenFD = -1
-        clients.removeAll()
         // Wake each blocked read with end-of-stream; its loop then closes the fd
         // and reports the disconnect. The shim reconnects on its next call. Done
         // under the lock: `serve` removes its fd under it before closing, so none
@@ -287,9 +278,6 @@ public final class BridgeServer: @unchecked Sendable {
         }
 
         if let identity {
-            stateLock.lock()
-            clients.removeValue(forKey: identity.id)
-            stateLock.unlock()
             BridgeLog.info("client disconnected: \(identity.displayName)", category: .bridge)
             observe(.disconnected(identity))
         }
@@ -298,15 +286,29 @@ public final class BridgeServer: @unchecked Sendable {
     private func handleHandshake(_ line: Data, fd: Int32) throws -> ClientIdentity {
         let hello = try BridgeCodec.decode(BridgeHello.self, from: line)
 
-        // Trust the kernel over the handshake for the pid.
-        let pid = SocketEndpoint.peerPID(fd) ?? hello.pid
-        // Prefer the client executable the shim resolved; the peer path is only ever
-        // our own shim and is useless for identifying who is calling.
+        // The pid and the client's identity come from the kernel and the process
+        // tree, never from the handshake: `hello.pid` and `hello.clientExecutable`
+        // are ignored. Without a peer pid there is nothing to attribute the
+        // connection to, so it is refused.
+        guard let pid = SocketEndpoint.peerPID(fd) else {
+            BridgeLog.warning("refused a connection whose peer pid could not be read", category: .bridge)
+            throw SocketEndpoint.SocketError.closed
+        }
+        // A macbridge peer is our shim and the client is somewhere up its process
+        // tree; anything else connected to the socket directly and is the client.
+        let peerPath = ClientIdentity.executablePath(forPID: pid)
+        let derived = ClientNaming.identify(
+            claimedName: hello.clientName,
+            peerExecutable: peerPath,
+            ancestors: ClientNaming.isShim(executablePath: peerPath)
+                ? ClientNaming.ancestorExecutables(ofShimPID: pid) : []
+        )
         let identity = ClientIdentity(
-            name: hello.clientName,
+            name: derived.name,
+            claimedName: derived.disagreeingClaim,
             version: hello.clientVersion,
             pid: pid,
-            executablePath: hello.clientExecutable ?? ClientIdentity.executablePath(forPID: pid)
+            executablePath: derived.executable
         )
 
         var refusal: String?
@@ -331,13 +333,10 @@ public final class BridgeServer: @unchecked Sendable {
             throw SocketEndpoint.SocketError.closed
         }
 
-        stateLock.lock()
-        clients[identity.id] = identity
-        stateLock.unlock()
-
         BridgeLog.info(
-            "client connected: \(identity.displayName) pid \(identity.pid) "
-                + "(\(identity.executablePath ?? "unknown path"))",
+            "client connected: \(identity.displayName) "
+                + "(\(identity.executablePath ?? "unknown path")) via macbridge pid \(identity.pid)"
+                + (identity.claimedName.map { " — shim reported itself as '\($0)'" } ?? ""),
             category: .bridge
         )
         observe(.connected(identity))
@@ -400,8 +399,9 @@ public final class BridgeServer: @unchecked Sendable {
                 } catch {
                     let elapsed = Date().timeIntervalSince(started)
                     let message = (error as? MacBridgeError)?.errorDescription ?? error.localizedDescription
-                    response = .failure(id: request.id, message)
                     let logged = (error as? MacBridgeError)?.logDescription ?? error.localizedDescription
+                    // Redacted text for the shim's own log; the message is for the model.
+                    response = .failure(id: request.id, message, logError: (error as? MacBridgeError)?.logDescription)
                     BridgeLog.error("\(name) failed — \(identity.displayName): \(logged)", category: .tools)
                     observe(.call(identity, tool: name, ok: false, detail: message,
                                   summary: nil, duration: elapsed))

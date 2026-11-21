@@ -254,12 +254,9 @@ public actor RemindersService {
 
         if let title = args.optionalString("title") { reminder.title = title }
 
-        if args.contains("due") {
+        if let requestedDue = try args.clearableDate("due") {
             let oldDue = dueDate(reminder)
-            if args.isExplicitNull("due") || args.optionalString("due") == nil {
-                reminder.dueDateComponents = nil
-                removeDueAlarms(from: reminder, oldDue: oldDue, includingRelative: true)
-            } else if let due = try args.optionalDate("due") {
+            if let due = requestedDue {
                 setDue(due, on: reminder)
 
                 // The old due-time alarm has to go with the old due date, or
@@ -270,6 +267,9 @@ public actor RemindersService {
                    !(reminder.alarms ?? []).contains(where: { $0.absoluteDate == due.date }) {
                     reminder.addAlarm(EKAlarm(absoluteDate: due.date))
                 }
+            } else {
+                reminder.dueDateComponents = nil
+                removeDueAlarms(from: reminder, oldDue: oldDue, includingRelative: true)
             }
         }
         if let notes = args.clearableString("notes") {

@@ -51,9 +51,13 @@ public actor ToolRegistry {
     // MARK: Definitions
 
     /// Every tool, in a stable order so `tools/list` output is diffable.
-    public nonisolated static func definitions() -> [Tool] {
-        CalendarTools.definitions() + RemindersTools.definitions()
-    }
+    ///
+    /// Built once: every call asks about tools several times (policy, activity
+    /// labels, argument checks), and the list never changes while running.
+    public nonisolated static func definitions() -> [Tool] { allDefinitions }
+
+    private nonisolated static let allDefinitions: [Tool] =
+        (CalendarTools.definitions() + RemindersTools.definitions()).map(ToolMetadata.decorated)
 
     /// Every tool name, in ``definitions()`` order.
     public nonisolated static var toolNames: [String] {

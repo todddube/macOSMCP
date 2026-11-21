@@ -22,8 +22,8 @@ use it, [download a release](README.md#install) instead; nothing here is needed 
 
 | | Needed for | Notes |
 |---|---|---|
-| **macOS 13 or later** | everything | The app's minimum too. |
-| **Xcode 16.3 or later** | the app, the tests | Command Line Tools alone aren't enough: swift-testing and `xcodebuild` ship only with Xcode. The MCP Swift SDK needs Swift 6.1, which arrived in Xcode 16.3. CI builds on macOS 15 with its default Xcode. A beta Xcode works; a release one is preferred when both are installed. |
+| **macOS 14 or later** | everything | The app's minimum too. |
+| **Xcode 26 or later** | the app, the tests | Command Line Tools alone aren't enough: swift-testing and `xcodebuild` ship only with Xcode. The app icon is an Icon Composer `.icon`, which Xcode 26 introduced. CI builds on macOS 26 with its default Xcode. A beta Xcode works; a release one is preferred when both are installed. |
 | An Apple Development certificate | permissions that survive rebuilds | Optional. Free with an Apple ID in Xcode → Settings → Accounts. Without one the app is signed ad-hoc and you grant Calendar and Reminders again after each install. See [Signing](#signing-and-permissions-across-rebuilds). |
 | [XcodeGen](https://github.com/yonaskolb/XcodeGen) | editing `project.yml` | Optional: `brew install xcodegen`. The generated Xcode project is checked in. |
 | A Developer ID certificate and notary credentials | a release for other Macs | Paid Apple Developer Program. See [Making a release](#making-a-release). |
@@ -81,7 +81,7 @@ make run        # launch the installed app
 make stop       # quit it (leaves connected clients' shims alone)
 make project    # regenerate MacBridge.xcodeproj from project.yml
 make signing    # re-detect the signing certificate
-make icons      # redraw the app icon
+make icons      # redraw the layered app icon (App/AppIcon.icon)
 make doctor     # permissions, bridge status, client setup, tool inventory
 make tools      # list the tools
 make release    # signed, notarized, stapled DMG (needs a Developer ID)
@@ -111,7 +111,8 @@ Terminal report Terminal's access. The menu-bar panel shows what the app itself 
 A few rules the suites enforce, so a change that breaks them fails a test, not a user:
 
 - Every advertised tool has a handler, and every handler is advertised.
-- The version in `MacBridge.swift` matches `MARKETING_VERSION` in `project.yml`.
+- The version in `MacBridge.swift` matches `MARKETING_VERSION` in `project.yml` and the CLI's
+  `Info.plist`, and the newest README version-history entry carries the same version and `releaseDate`.
 - The MCP SDK pin in `Package.swift` matches the one in `project.yml`.
 - Every argument name a tool accepts is in its schema, or in a short, tested list of aliases.
 
@@ -236,13 +237,17 @@ before a release.
 
 ## Icons
 
-The artwork is code, not checked-in images. `Tools/generate-icons.swift` draws the app icon with
-CoreGraphics into `App/Assets.xcassets`; edit it and run `make icons`. `BridgeRenderer` in
+The artwork is code, not checked-in images. `Tools/generate-icons.swift` draws the app icon's
+layers with CoreGraphics and writes them, with `icon.json`, into the Icon Composer bundle
+`App/AppIcon.icon`; edit it and run `make icons`. The layers are square, unmasked and carry no
+highlight or shadow: macOS 26+ adds the mask, glass and the dark/tinted/clear looks, and Xcode
+builds the older `AppIcon.icns` from the same bundle. Preview with Icon Composer or
+`ictool App/AppIcon.icon --export-image ...` (in Xcode's `Icon Composer.app/Contents/Executables`). `BridgeRenderer` in
 `App/BridgeTraffic.swift` draws the menu-bar icon live, including the traffic animation.
 
 - **App icon:** a Mac mini under a suspension bridge: the machine on one side, the assistant on
   the other, MacBridge as the span. At 16px it reduces to a blue tile, a pale slab and a bright
-  arc; the hangers, port and power light appear from 128px up.
+  arc; the hangers, port and power light are fine detail that disappears cleanly at small sizes.
 - **Menu bar:** the same span in the menu bar's text colour, with calls crossing as coloured cars.
   A break in the deck means missing permissions or a stopped bridge. The two dots underneath are
   Claude Code (left) and Claude Desktop (right). Under Reduce Motion nothing animates.
@@ -258,9 +263,10 @@ certificate; an Apple Development certificate can't stand in for it.
    Developer ID Application. Needs the Account Holder or Admin role.
 2. Store notary credentials once:
    `xcrun notarytool store-credentials macbridge-notary --apple-id <id> --team-id <TEAMID> --password <app-specific-password>`
-3. Bump the version in `Sources/MacBridgeKit/MacBridge.swift` and in `project.yml`
-   (`MARKETING_VERSION`, and `CURRENT_PROJECT_VERSION` by one), then `make project`. Add a paragraph
-   to the README's version history.
+3. Bump `version` and set `releaseDate` (YYYY-MM-DD) in `Sources/MacBridgeKit/MacBridge.swift`; bump
+   `project.yml` (`MARKETING_VERSION`, and `CURRENT_PROJECT_VERSION` by one) and the
+   `CFBundleShortVersionString` in `Sources/macbridge/Info.plist`, then `make project`. Add a
+   paragraph to the README's version history headed `**<version>** · <releaseDate>`.
 4. `make release`: runs the tests, builds with the Developer ID certificate, packs
    `MacBridge-<version>.dmg` with an Applications shortcut, signs it, notarizes it, staples the
    ticket and checks it the way Gatekeeper will. It checks the certificate and the credentials

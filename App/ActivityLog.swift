@@ -69,6 +69,43 @@ final class ActivityLog: ObservableObject {
 
     private let limit = 500
 
+    /// Connected sessions of one client. Claude Desktop starts two shims, so one
+    /// client is often more than one connection; each keeps its own identity and ID.
+    struct ClientGroup: Identifiable {
+        let name: String
+        let sessions: [ClientIdentity]
+        var id: String { name }
+
+        /// "Claude Desktop", or "Claude Desktop · 2 sessions".
+        var title: String {
+            sessions.count > 1 ? "\(name) · \(sessions.count) sessions" : name
+        }
+    }
+
+    /// Connected clients grouped by name, in order of first connection.
+    var clientGroups: [ClientGroup] {
+        var order: [String] = []
+        var byName: [String: [ClientIdentity]] = [:]
+        for client in clients {
+            if byName[client.name] == nil { order.append(client.name) }
+            byName[client.name, default: []].append(client)
+        }
+        return order.map { ClientGroup(name: $0, sessions: byName[$0] ?? []) }
+    }
+
+    /// The traffic strip's name for the far end: nil with no one connected, the
+    /// client's name for one, otherwise a count of clients and sessions.
+    var trafficLabel: String? {
+        let groups = clientGroups
+        switch groups.count {
+        case 0: return nil
+        case 1: return groups[0].title
+        default:
+            return "\(groups.count) clients"
+                + (clients.count > groups.count ? " · \(clients.count) sessions" : "")
+        }
+    }
+
     /// Tool calls only. Connections are recorded too but must never crowd out the
     /// calls, which are the thing worth seeing.
     var toolCalls: [Entry] { entries.filter { $0.kind != .connection } }
@@ -122,6 +159,15 @@ final class ActivityLog: ObservableObject {
         } else {
             clientsWithFailedLastCall.insert(client.name)
         }
+    }
+
+    /// Forget every connected session, when the bridge stops. Their connections are
+    /// closed with it, and nothing reports their disconnects once serving is over.
+    /// The history of calls and connections is kept; failed-call flags go with the
+    /// sessions they described.
+    func clearConnectedClients() {
+        clients.removeAll()
+        clientsWithFailedLastCall.removeAll()
     }
 
     /// Track a client connecting or disconnecting, and log it as a connection row.

@@ -42,10 +42,10 @@ enum UpdatePrompt {
         switch outcome {
         case .success(.available(let version, let page)):
             alert.messageText = "MacBridge \(version) is available"
-            alert.informativeText = "You have \(MacBridge.version). The release page has the download and what changed."
+            alert.informativeText = "You have \(MacBridge.version), released \(MacBridge.releaseDateText). The release page has the download and what changed."
             alert.addButton(withTitle: "Open Release Page")
             alert.addButton(withTitle: "Later")
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             if alert.runModal() == .alertFirstButtonReturn {
                 NSWorkspace.shared.open(page)
             }
@@ -63,13 +63,13 @@ enum UpdatePrompt {
             alert.informativeText = "\(error.localizedDescription) Releases are also listed on GitHub."
             alert.addButton(withTitle: "OK")
             alert.addButton(withTitle: "Open Releases")
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             if alert.runModal() == .alertSecondButtonReturn {
                 NSWorkspace.shared.open(Credits.releasesURL)
             }
             return
         }
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         alert.runModal()
     }
 }

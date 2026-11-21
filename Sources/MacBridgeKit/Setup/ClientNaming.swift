@@ -149,10 +149,65 @@ public enum ClientNaming {
     /// Reported to the app so its log and menu name the real client rather than the
     /// shim, which is all the server can observe on its own.
     public static func clientExecutable() -> String? {
-        let chain = ancestorExecutables()
-        return chain.first { path in
+        clientExecutable(inChain: ancestorExecutables())
+    }
+
+    /// The first non-wrapper path of an ancestor chain, nearest first.
+    public static func clientExecutable(inChain chain: [String]) -> String? {
+        chain.first { path in
             !isPassthrough((path as NSString).lastPathComponent.lowercased())
         } ?? chain.first
+    }
+
+    /// The executable name of the shim, which is also the app's own binary
+    /// (`MacBridge.app/Contents/MacOS/macbridge`).
+    static let shimExecutableName = "macbridge"
+
+    /// Whether the process on the other end of the socket is a `macbridge` shim, so
+    /// that the AI client is somewhere above it rather than the peer itself.
+    ///
+    /// Matched on the executable's name, not on one exact path, so a SwiftPM
+    /// development build (`.build/debug/macbridge`, which talks to the installed
+    /// app's socket) stays usable. The name is compared case-insensitively because
+    /// the filesystem is. This is attribution, not authentication: a same-user
+    /// process can copy a binary under that name, as it could also fake an ancestor.
+    public static func isShim(executablePath: String?) -> Bool {
+        guard let executablePath else { return false }
+        return (executablePath as NSString).lastPathComponent.lowercased() == shimExecutableName
+    }
+
+    /// The client's identity as the app can establish it for itself.
+    ///
+    /// - A `macbridge` peer is the shim, so the client is found by walking
+    ///   `ancestors` (the shim's parent and up). Any other peer connected to the
+    ///   socket directly, so *it* is the client and `ancestors` are ignored: a
+    ///   process with no useful parents cannot pass itself off as anything.
+    /// - The executable and the name are derived, never taken from the handshake.
+    /// - Nothing derivable gives "Unknown client". The self-reported `claimedName`
+    ///   (which may come from `--client`) is never used as the name; it comes back
+    ///   as `disagreeingClaim` whenever it differs from the derived name, so callers
+    ///   can show "reported itself as 'X'".
+    ///
+    /// Pure, so the rule is testable without spawning processes.
+    public static func identify(
+        claimedName: String,
+        peerExecutable: String?,
+        ancestors: [String]
+    ) -> (name: String, executable: String?, disagreeingClaim: String?) {
+        let chain = isShim(executablePath: peerExecutable)
+            ? ancestors
+            : (peerExecutable.map { [$0] } ?? [])
+        let name = friendlyName(forChain: chain)
+        let claimed = claimedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let agrees = claimed.isEmpty || claimed.caseInsensitiveCompare(name) == .orderedSame
+        return (name, clientExecutable(inChain: chain), agrees ? nil : claimed)
+    }
+
+    /// The ancestors of a connected shim, starting at its parent: the shim itself
+    /// is ours and says nothing about who is calling.
+    public static func ancestorExecutables(ofShimPID pid: pid_t) -> [String] {
+        guard let parent = parentPID(of: pid) else { return [] }
+        return ancestorExecutables(startingAt: parent)
     }
 
     /// The name to report for the client that spawned this process.

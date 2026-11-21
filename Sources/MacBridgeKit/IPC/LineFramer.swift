@@ -62,9 +62,6 @@ public struct LineFramer {
         return lines
     }
 
-    /// Any trailing bytes not yet terminated by a newline.
-    public var pending: Data { buffer }
-
     private static func trimmingCarriageReturn(_ data: Data) -> Data {
         guard data.last == 0x0D else { return data }
         return data.dropLast()

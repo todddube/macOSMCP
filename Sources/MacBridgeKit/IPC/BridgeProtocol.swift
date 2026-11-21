@@ -16,7 +16,7 @@ import MCP
 /// Deliberately *not* MCP. The shim already links the MCP SDK and speaks the
 /// protocol to the client, so the app only needs to answer two questions: what
 /// tools exist, and please run this one. That keeps the app a tool server — the
-/// thing that owns TCC, consent and the activity log — and keeps MCP version
+/// thing that owns TCC, the access policy and the activity log — and keeps MCP version
 /// churn on the shim side. Both ship in the same bundle, so they update together.
 ///
 /// Messages are newline-delimited JSON, one object per line, same framing as MCP
@@ -91,9 +91,11 @@ public enum BridgeProtocol {
 
 /// First line the shim sends, identifying which AI client it is serving.
 ///
-/// The client name is self-reported and therefore untrusted; it labels rows in the
-/// app's UI and will key the consent store. It is never used to make a security
-/// decision on its own — the process identity below is what is checked.
+/// Everything here is self-reported and therefore untrusted. The app takes the
+/// peer's pid from the kernel and works out the client's name and executable from
+/// the process tree itself (see ``ClientIdentity``); `clientName` survives only as
+/// a display hint when that finds nothing, and `pid` and `clientExecutable` are
+/// ignored by the app. They are still sent so older apps keep working.
 public struct BridgeHello: Codable, Sendable {
     public var protocolVersion: Int
     public var clientName: String
@@ -101,9 +103,8 @@ public struct BridgeHello: Codable, Sendable {
     public var pid: Int32
     /// The AI client's own executable, as the shim resolved it from the process tree.
     ///
-    /// Sent because the server can only see the *peer* of the socket, which is the
-    /// shim itself — so logs read "Claude Code (…/MacBridge.app/…/macbridge)", naming
-    /// our own binary rather than the client's and telling nobody anything.
+    /// Informational only: the app derives this itself from the peer's ancestors,
+    /// because the peer of the socket is the shim and a self-reported path can't be trusted.
     public var clientExecutable: String?
 
     public init(
@@ -128,7 +129,7 @@ public struct BridgeWelcome: Codable, Sendable {
     /// The `.app` that answered. The shim checks this against its own bundle so a
     /// second copy of MacBridge cannot quietly serve requests meant for this one.
     public var bundlePath: String?
-    /// Set when the app is refusing to serve this client, e.g. denied by consent.
+    /// Set when the app is refusing to serve this client, e.g. a protocol mismatch.
     public var refusal: String?
 
     public init(appVersion: String, toolCount: Int, bundlePath: String? = nil, refusal: String? = nil) {
@@ -178,18 +179,27 @@ public struct BridgeResponse: Codable, Sendable {
     public var result: Value?
     /// Present when `ok` is false. Carries the message a model should read.
     public var error: String?
+    /// ``error`` with every user-supplied value left out, safe for the shim's log
+    /// file and the unified log. Absent from older apps, and when the app has no
+    /// redacted form; the shim then logs only that the tool failed.
+    public var logError: String?
 
-    public init(id: Int, ok: Bool, tools: [Tool]? = nil, result: Value? = nil, error: String? = nil) {
+    public init(
+        id: Int, ok: Bool, tools: [Tool]? = nil, result: Value? = nil,
+        error: String? = nil, logError: String? = nil
+    ) {
         self.id = id
         self.ok = ok
         self.tools = tools
         self.result = result
         self.error = error
+        self.logError = logError
     }
 
-    /// A failed response carrying `message` for the model.
-    public static func failure(id: Int, _ message: String) -> BridgeResponse {
-        BridgeResponse(id: id, ok: false, error: message)
+    /// A failed response carrying `message` for the model, and optionally a
+    /// redacted `logError` for logs.
+    public static func failure(id: Int, _ message: String, logError: String? = nil) -> BridgeResponse {
+        BridgeResponse(id: id, ok: false, error: message, logError: logError)
     }
 }
 

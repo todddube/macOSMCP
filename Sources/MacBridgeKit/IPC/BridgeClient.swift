@@ -13,19 +13,23 @@ import MCP
 
 /// The shim's side of the bridge: connects to MacBridge.app and forwards calls.
 ///
-/// An actor so requests serialise. The protocol pairs one response to one request
-/// on a single connection, and serialising here is simpler and cheaper than
-/// multiplexing by id for a client that is driving one conversation at a time.
+/// An actor, with a gate so requests serialise even across suspension points. The
+/// protocol pairs one response to one request on a single connection, and
+/// serialising here is simpler and cheaper than multiplexing by id for a client
+/// that is driving one conversation at a time. The blocking socket reads (up to the
+/// reply timeout) run on the `io` queue behind a continuation, so they never hold
+/// one of the cooperative pool's few threads.
 public actor BridgeClient {
 
-    private var fd: Int32 = -1
-    private var framer = LineFramer()
-    /// Lines already framed but not yet consumed. A single socket read can finish
-    /// several messages; without this queue the extras were extracted from the
-    /// framer and then dropped on the floor.
-    private var queued: [Data] = []
+    /// The open connection; nil until connected and after ``disconnect()``.
+    private var wire: Wire?
     private var nextID = 0
     private let io = DispatchQueue(label: "com.thedubes.macbridge.client.io")
+    private let replyTimeout: TimeInterval
+
+    /// Serialises requests: set while one holds the connection.
+    private var busy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
     /// The app's handshake reply from the current connection; nil until connected.
     public private(set) var welcome: BridgeWelcome?
@@ -38,7 +42,10 @@ public actor BridgeClient {
         case appUnavailable(String)
         case refused(String)
         case protocolFailure(String)
-        case toolFailed(String)
+        /// A tool failed in the app. `logMessage` is the app's redacted form of the
+        /// failure, safe to log; nil when the app sent none (an older app, or an
+        /// error with no redacted form).
+        case toolFailed(String, logMessage: String? = nil)
         case wrongBundle(expected: String, actual: String)
         /// The connection dropped after a write tool's request was sent, so it may
         /// or may not have run. Never retried: running it again could duplicate it.
@@ -46,12 +53,25 @@ public actor BridgeClient {
         /// The app took longer than the read timeout to answer.
         case noReply(tool: String, seconds: Int, changesData: Bool)
 
+        /// What may go in a log file or the unified log. A tool failure's message can
+        /// echo event and calendar titles, so only the app's redacted `logMessage` is
+        /// used, or a bare statement that it failed. Everything else carries only
+        /// fixed text, paths and macOS error wording.
+        public var logDescription: String {
+            switch self {
+            case .toolFailed(_, let logMessage):
+                return logMessage ?? "the tool failed (details withheld from the log)"
+            default:
+                return errorDescription ?? "\(self)"
+            }
+        }
+
         public var errorDescription: String? {
             switch self {
             case .appUnavailable(let detail): return detail
             case .refused(let detail): return detail
             case .protocolFailure(let detail): return "Bridge protocol failure: \(detail)"
-            case .toolFailed(let detail): return detail
+            case .toolFailed(let detail, _): return detail
             case .wrongBundle(let expected, let actual):
                 return """
                     This macbridge belongs to \(expected), but \(actual) answered on the bridge. \
@@ -73,10 +93,12 @@ public actor BridgeClient {
         }
     }
 
-    private init() {}
+    private init(replyTimeout: TimeInterval) {
+        self.replyTimeout = replyTimeout
+    }
 
-    /// How long a request waits for the app's reply.
-    static let replyTimeout: TimeInterval = 120
+    /// How long a request waits for the app's reply by default.
+    public static let defaultReplyTimeout: TimeInterval = 120
 
     // MARK: Connecting
 
@@ -91,9 +113,10 @@ public actor BridgeClient {
         clientVersion: String? = nil,
         socketURL: URL,
         launchIfNeeded: Bool = true,
-        timeout: TimeInterval = 20
+        timeout: TimeInterval = 20,
+        replyTimeout: TimeInterval = BridgeClient.defaultReplyTimeout
     ) async throws -> BridgeClient {
-        let client = BridgeClient()
+        let client = BridgeClient(replyTimeout: replyTimeout)
 
         await client.rememberReconnect(clientName: clientName, clientVersion: clientVersion, socketURL: socketURL)
 
@@ -108,7 +131,7 @@ public actor BridgeClient {
             )
         }
 
-        try AppLauncher.launchContainingApp()
+        try await AppLauncher.launchContainingApp()
 
         // Poll rather than watch the filesystem: the socket appearing is not the
         // same as it accepting, and a connect attempt tests both at once.
@@ -152,23 +175,30 @@ public actor BridgeClient {
         // because an EventKit query across many calendars is legitimately slow, and
         // longer than the app's 90-second budget for a delete confirmation
         // (queueing included), so a refusal from that still arrives.
-        var timeout = timeval(tv_sec: Int(Self.replyTimeout), tv_usec: 0)
+        let whole = replyTimeout.rounded(.down)
+        var timeout = timeval(
+            tv_sec: Int(whole),
+            tv_usec: Int32((replyTimeout - whole) * 1_000_000)
+        )
         setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
-        fd = socket
+        wire = Wire(fd: socket)
         return true
     }
 
-    private func handshake(clientName: String, clientVersion: String?) throws {
+    private func handshake(clientName: String, clientVersion: String?) async throws {
+        guard let wire else { throw ClientError.protocolFailure("not connected") }
         let hello = BridgeHello(
             clientName: clientName,
             clientVersion: clientVersion,
-            // Nearest ancestor that is not a wrapper: the client itself.
+            // Informational: the app works the client out for itself.
             clientExecutable: ClientNaming.clientExecutable()
         )
-        try SocketEndpoint.writeAll(fd, try BridgeCodec.line(hello))
-
-        guard let line = try readLine() else {
+        let line = try await onIO(wire) { wire in
+            try wire.send(try BridgeCodec.line(hello))
+            return try wire.readLine()
+        }
+        guard let line else {
             throw ClientError.protocolFailure("the app closed the connection during the handshake")
         }
         let welcome = try BridgeCodec.decode(BridgeWelcome.self, from: line)
@@ -194,9 +224,13 @@ public actor BridgeClient {
     }
 
     /// Close the socket. Once a connection has succeeded, the next request reconnects.
-    public func disconnect() {
-        if fd >= 0 { close(fd) }
-        fd = -1
+    ///
+    /// Not public: closing a descriptor under a blocked read lets the number be
+    /// reused. Callable only while no request is in flight, which is true inside
+    /// ``request(_:)`` (it holds the gate) and for tests with an idle client.
+    func disconnect() {
+        wire?.close()
+        wire = nil
     }
 
     // MARK: Requests
@@ -219,7 +253,10 @@ public actor BridgeClient {
         if response.ok {
             return response.result ?? .null
         }
-        throw ClientError.toolFailed(response.error ?? "the tool failed with no message")
+        throw ClientError.toolFailed(
+            response.error ?? "the tool failed with no message",
+            logMessage: response.logError
+        )
     }
 
     /// Whether the app answers at all. Never throws: any failure is just `false`.
@@ -248,17 +285,32 @@ public actor BridgeClient {
     /// Restarting the app still recovers transparently: writing to the closed
     /// socket fails before anything is sent.
     private func request(_ request: BridgeRequest) async throws -> BridgeResponse {
+        await acquire()
+        defer { release() }
+
         var sent = false
         do {
-            return try sendAndReceive(request, sent: &sent)
+            return try await sendAndReceive(request, sent: &sent)
         } catch let error as SocketEndpoint.SocketError where Self.isTimeout(error) {
             throw abandon(request)
         } catch {
-            guard shouldRetry(after: error), let reconnect else { throw error }
+            // A cancelled caller interrupts the read, which looks like a dropped
+            // connection; retrying for someone who has gone away would only repeat
+            // the work.
+            if Task.isCancelled {
+                disconnect()
+                throw CancellationError()
+            }
+            guard shouldRetry(after: error), let reconnect else {
+                // Not retried, so nothing else will close this connection: after a
+                // partly written request or an unreadable reply the framing may be
+                // out of step (a decode error, an oversized line, a read failure),
+                // and the next request would read the wrong response.
+                disconnect()
+                throw error
+            }
 
             disconnect()
-            framer = LineFramer()
-            queued.removeAll()
 
             if sent && !Self.isSafeToRepeat(request) {
                 // The next request reconnects on its own: with no socket, its send
@@ -272,11 +324,14 @@ public actor BridgeClient {
             // recovering.
             guard try await reestablish(to: reconnect.socketURL) else { throw error }
             do {
-                try handshake(clientName: reconnect.clientName, clientVersion: reconnect.clientVersion)
+                try await handshake(clientName: reconnect.clientName, clientVersion: reconnect.clientVersion)
                 var resent = false
-                return try sendAndReceive(request, sent: &resent)
+                return try await sendAndReceive(request, sent: &resent)
             } catch let retryError as SocketEndpoint.SocketError where Self.isTimeout(retryError) {
                 throw abandon(request)
+            } catch {
+                disconnect()
+                throw error
             }
         }
     }
@@ -288,11 +343,9 @@ public actor BridgeClient {
     /// of queueing behind the stale reply.
     private func abandon(_ request: BridgeRequest) -> ClientError {
         disconnect()
-        framer = LineFramer()
-        queued.removeAll()
         return ClientError.noReply(
             tool: request.name ?? request.op.rawValue,
-            seconds: Int(Self.replyTimeout),
+            seconds: Int(replyTimeout.rounded(.up)),
             changesData: request.name.map(ToolRegistry.changesData) ?? false
         )
     }
@@ -317,7 +370,7 @@ public actor BridgeClient {
     private func reestablish(to socketURL: URL, timeout: TimeInterval = 15) async throws -> Bool {
         if tryConnect(to: socketURL) { return true }
 
-        try? AppLauncher.launchContainingApp()
+        try? await AppLauncher.launchContainingApp()
 
         let deadline = Date().addingTimeInterval(timeout)
         var delay: UInt64 = 150_000_000  // 150ms, doubling to 1s
@@ -349,29 +402,127 @@ public actor BridgeClient {
 
     /// - Parameter sent: set once every byte of the request has been written,
     ///   which is the point after which the app may have acted on it.
-    private func sendAndReceive(_ request: BridgeRequest, sent: inout Bool) throws -> BridgeResponse {
-        guard fd >= 0 else { throw ClientError.protocolFailure("not connected") }
-        try SocketEndpoint.writeAll(fd, try BridgeCodec.line(request))
-        sent = true
+    private func sendAndReceive(_ request: BridgeRequest, sent: inout Bool) async throws -> BridgeResponse {
+        guard let wire else { throw ClientError.protocolFailure("not connected") }
+        let payload = try BridgeCodec.line(request)
+        let requestID = request.id
 
-        // Responses arrive in order on this connection, but skip any whose id does
-        // not match rather than assuming — a mismatch means a bug worth not
-        // compounding by returning the wrong result.
-        while let line = try readLine() {
-            let response = try BridgeCodec.decode(BridgeResponse.self, from: line)
-            if response.id == request.id || response.id == 0 { return response }
+        // The flag is written on the io queue; reading it after the await is safe
+        // because the continuation resumes after that work has finished.
+        let box = SentFlag()
+        defer { sent = box.value }
+
+        return try await onIO(wire) { wire in
+            try wire.send(payload)
+            box.value = true
+
+            // Responses arrive in order on this connection, but skip any whose id
+            // does not match rather than assuming: a mismatch means a bug worth not
+            // compounding by returning the wrong result.
+            while let line = try wire.readLine() {
+                let response = try BridgeCodec.decode(BridgeResponse.self, from: line)
+                if response.id == requestID || response.id == 0 { return response }
+            }
+            throw ClientError.protocolFailure("the app closed the connection before replying")
         }
-        throw ClientError.protocolFailure("the app closed the connection before replying")
     }
 
-    private func readLine() throws -> Data? {
-        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+    // MARK: Blocking I/O
+
+    /// Run blocking socket work on the `io` queue, resuming when it finishes.
+    ///
+    /// Cancelling the caller shuts the socket down, which ends a read that would
+    /// otherwise sit out the whole reply timeout.
+    private func onIO<T: Sendable>(
+        _ wire: Wire,
+        _ work: @escaping @Sendable (Wire) throws -> T
+    ) async throws -> T {
+        let queue = io
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                queue.async {
+                    do {
+                        continuation.resume(returning: try work(wire))
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+        } onCancel: {
+            wire.interrupt()
+        }
+    }
+
+    /// Wait for the connection to be free of any other request.
+    private func acquire() async {
+        if !busy {
+            busy = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    /// Hand the connection to the next waiting request, or mark it free.
+    private func release() {
+        if waiters.isEmpty {
+            busy = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
+/// Whether a request's bytes were all written; see ``BridgeClient``'s `sendAndReceive`.
+private final class SentFlag: @unchecked Sendable {
+    var value = false
+}
+
+/// One connection's socket and its framing state.
+///
+/// Used from the `io` queue only while a request holds the client's gate, so its
+/// buffers are never touched by two threads. The lock guards the descriptor, which
+/// ``interrupt()`` (on cancellation) and ``close()`` can race.
+private final class Wire: @unchecked Sendable {
+    private let fd: Int32
+    private let lock = NSLock()
+    private var closed = false
+
+    private var framer = LineFramer()
+    /// Lines already framed but not yet consumed. A single socket read can finish
+    /// several messages; without this queue the extras were extracted from the
+    /// framer and then dropped on the floor.
+    private var queued: [Data] = []
+    private var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+
+    init(fd: Int32) {
+        self.fd = fd
+    }
+
+    func send(_ data: Data) throws {
+        try SocketEndpoint.writeAll(fd, data)
+    }
+
+    /// The next whole line, blocking until one arrives; nil at end of stream.
+    func readLine() throws -> Data? {
         while true {
             if !queued.isEmpty { return queued.removeFirst() }
 
             guard let chunk = try SocketEndpoint.read(fd, into: &buffer) else { return nil }
             queued.append(contentsOf: try framer.append(chunk))
         }
+    }
+
+    /// Wake a blocked read or write without releasing the descriptor.
+    func interrupt() {
+        lock.lock(); defer { lock.unlock() }
+        if !closed { shutdown(fd, SHUT_RDWR) }
+    }
+
+    func close() {
+        lock.lock(); defer { lock.unlock() }
+        guard !closed else { return }
+        closed = true
+        Darwin.close(fd)
     }
 }
 
@@ -400,7 +551,7 @@ public enum AppLauncher {
     /// `open -g` so starting a conversation never steals focus from what the user
     /// is doing, and `/usr/bin/open` rather than `NSWorkspace` to keep MacBridgeKit
     /// free of AppKit.
-    static func launchContainingApp() throws {
+    static func launchContainingApp() async throws {
         guard let bundle = containingAppBundle() else {
             throw BridgeClient.ClientError.appUnavailable(
                 """
@@ -418,13 +569,22 @@ public enum AppLauncher {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
+        // Awaited through the termination handler rather than `waitUntilExit()`,
+        // which would block a thread of the cooperative pool.
         do {
-            try process.run()
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                process.terminationHandler = { _ in continuation.resume() }
+                do {
+                    try process.run()
+                } catch {
+                    process.terminationHandler = nil
+                    continuation.resume(throwing: error)
+                }
+            }
         } catch {
             throw BridgeClient.ClientError.appUnavailable(
                 "Could not launch \(bundle.lastPathComponent): \(error.localizedDescription)"
             )
         }
-        process.waitUntilExit()
     }
 }

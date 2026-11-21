@@ -79,6 +79,20 @@ public enum Schema {
         ])
     }
 
+    /// An array property whose items match `items`.
+    public static func array(_ description: String, items: Value) -> Value {
+        .object(["type": .string("array"), "description": .string(description), "items": items])
+    }
+
+    /// A property of a given JSON type (or several, such as `["string", "null"]`),
+    /// for output schemas, where values aren't restricted the way inputs are.
+    public static func typed(_ types: String..., description: String) -> Value {
+        .object([
+            "type": types.count == 1 ? .string(types[0]) : .array(types.map { .string($0) }),
+            "description": .string(description),
+        ])
+    }
+
     // MARK: Reused fragments
 
     /// The date format blurb, repeated so each parameter is self-documenting
