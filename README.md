@@ -310,8 +310,9 @@ with its own deadline. A new **Settings** window (⌘, or **Settings…**) with 
 Safety, General and Diagnostics, and opens when you open MacBridge from Finder, so hiding the
 menu-bar icon never strands you. A launch splash shows the app's card and flies its icon into
 the menu bar; it is skipped when a client starts the app, respects Reduce Motion, and can be
-turned off in Settings. The menu-bar icon is a template image when idle, so it follows the menu
-bar's colors, with status dots drawn into it; the panel scrolls on small screens, uses no text
+turned off in Settings. The menu-bar icon follows the menu bar's colors, with a dot under it per
+client: green when connected or ready, yellow when something needs a look (Calendar or Reminders
+not granted, or the last call failed), red when calls can't work; the panel scrolls on small screens, uses no text
 below 10 points, and shows Claude Desktop's two connections as one client with 2 sessions. Three MCP prompts (`daily-agenda`, `plan-my-week`, `review-overdue`) show up as slash
 commands in Claude Code. Every tool has a readable title for client UIs; the three destructive tools tell
 Claude Code to always ask; and the read tools publish an output schema. Client names are now

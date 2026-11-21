@@ -87,9 +87,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// The menu-bar icon, in its own view so it can observe and react to state.
 ///
 /// Custom artwork rather than an SF Symbol: no stock symbol says "bridge", and the
-/// glyph should match the app icon. It is drawn by `BridgeRenderer`. While the bridge
-/// is quiet it is a template image, so the system tints it like any other menu-bar
-/// icon; cars crossing, an alert or a client in trouble switch to a colour image.
+/// glyph should match the app icon. It is drawn by `BridgeRenderer`, in the menu
+/// bar's own text colour, with a coloured dot per client; only with no clients
+/// installed is it a template image the system tints like any other icon.
 /// While calls are in flight the frames animate cars crossing the span; once the
 /// bridge is quiet the clock stops and nothing redraws.
 struct MenuBarLabel: View {
@@ -99,6 +99,10 @@ struct MenuBarLabel: View {
     /// depend on which clients are connected.
     @ObservedObject var log: ActivityLog
     @ObservedObject var traffic: BridgeTraffic
+    /// Keys the image, so a light/dark switch re-renders the label: the idle icon is a
+    /// colour image whose bridge is drawn in the bar's text colour, and nothing
+    /// else redraws it while the bridge is quiet.
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let health = model.clientHealth
@@ -107,6 +111,7 @@ struct MenuBarLabel: View {
         // to read, and MenuBarExtra(content:label:) has no title of its own.
         Image(nsImage: image)
             .renderingMode(image.isTemplate ? .template : .original)
+            .id(colorScheme)
             .accessibilityLabel(isAlert ? "MacBridge, needs attention" : "MacBridge")
             .accessibilityValue(health.filter { $0.health.level != .absent }
                 .map { "\($0.client.name): \($0.health.reason)" }.joined(separator: ". "))

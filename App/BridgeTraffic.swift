@@ -169,22 +169,24 @@ final class BridgeTraffic: ObservableObject {
 
     /// The menu-bar frame.
     ///
-    /// While the bridge is quiet and healthy this is a template image, the bridge
-    /// alone, so the system tints it for the menu bar (light, dark, selected or
-    /// wallpaper-tinted). Colour is used only when it carries meaning: cars crossing,
-    /// an alert, or a client in trouble. That image isn't a template, because a
-    /// template can't carry colour, and its palette is resolved inside the drawing
-    /// handler, which AppKit runs, and caches, once per appearance it's drawn in, so
+    /// Only a quiet bridge with no clients installed is a template image, which the
+    /// system tints for the menu bar (light, dark, selected or wallpaper-tinted).
+    /// Anything that carries meaning in colour (a client dot, cars crossing, an
+    /// alert) needs the colour image instead, because a template can't carry
+    /// colour. Its palette is resolved inside the drawing handler, which AppKit
+    /// runs, and caches, once per appearance it's drawn in, so
     /// the bridge follows the menu bar's own appearance rather than the system's:
     /// seen drawing a light road on a dark, wallpaper-tinted bar while the system was
     /// in Light Mode.
     ///
-    /// - Parameter dots: One level per known client, drawn under the bridge. A
-    ///   connected client is a filled dot even in the template; the other levels
-    ///   only show in the colour image, which a warning or problem triggers.
+    /// - Parameter dots: One level per known client, drawn under the bridge. Any
+    ///   dot makes this the colour image, so a connected or standby client reads
+    ///   green, one that needs a look yellow, and one that can't serve calls red; a template would draw
+    ///   them all in the bar's one colour. The template is left for an installation
+    ///   with no clients at all.
     func menuBarImage(alert: Bool, dots: [ClientHealth.Level]) -> NSImage {
         let snapshot = snapshot
-        let needsColour = alert || isActive || dots.contains { $0 == .warning || $0 == .problem }
+        let needsColour = alert || isActive || dots.contains { $0 != .absent }
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
             guard let cg = NSGraphicsContext.current?.cgContext else { return false }
             BridgeRenderer.draw(
@@ -273,13 +275,15 @@ enum BridgeRenderer {
         /// Fills the gap an alert cuts in the deck; nil leaves the gap empty.
         var alertBadge: CGColor?
         /// Colours the client dots by health. False for the template, which can only
-        /// say connected (filled) or not (absent).
+        /// say connected (filled) or not (absent); in practice the template is only
+        /// drawn when there are no dots.
         var colouredDots: Bool
 
         /// The menu bar: the whole bridge in the menu bar's text colour, so it reads
-        /// white on a dark bar and black on a light one, with only the cars in colour.
-        /// Must be read while the status button's appearance is current, as
-        /// `menuBarImage(alert:)` does, or it resolves for the wrong bar.
+        /// white on a dark bar and black on a light one, with the cars, client dots
+        /// and alert badge in colour. Must be read while the status button's
+        /// appearance is current, as `menuBarImage(alert:dots:)` does by reading it
+        /// inside its drawing handler, or it resolves for the wrong bar.
         static var menuBar: Palette {
             Palette(
                 structure: NSColor.labelColor.cgColor,
@@ -360,7 +364,9 @@ enum BridgeRenderer {
 
     /// One dot per client, centred along the bottom edge below the deck. Green is
     /// connected or on standby, yellow needs a look, red can't serve calls; a client
-    /// that isn't installed gets none. In the template only connected clients show.
+    /// that isn't installed gets none. `menuBarImage(alert:dots:)` only uses the
+    /// template when there are no dots; if one ever gets here, only connected
+    /// clients show, in the structure colour.
     private static func drawDots(
         _ cg: CGContext, in rect: CGRect, levels: [ClientHealth.Level], palette: Palette
     ) {
