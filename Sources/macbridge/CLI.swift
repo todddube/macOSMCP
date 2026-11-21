@@ -197,8 +197,23 @@ func runMCPServer(backend: ToolBackend) async throws {
         name: MacBridge.serverName,
         version: MacBridge.version,
         instructions: MacBridge.instructions,
-        capabilities: .init(tools: .init(listChanged: false))
+        capabilities: .init(prompts: .init(listChanged: false), tools: .init(listChanged: false))
     )
+
+    // Prompts are fixed text, so they are answered here rather than by the app:
+    // they work before the app is running, and the calls they lead to go through
+    // the bridge and its policy like any other.
+    await server.withMethodHandler(ListPrompts.self) { _ in
+        ListPrompts.Result(prompts: PromptCatalog.definitions)
+    }
+
+    await server.withMethodHandler(GetPrompt.self) { params in
+        do {
+            return try PromptCatalog.messages(for: params.name, arguments: params.arguments)
+        } catch {
+            throw MCPError.invalidParams(error.localizedDescription)
+        }
+    }
 
     await server.withMethodHandler(ListTools.self) { _ in
         ListTools.Result(tools: try await backend.listTools())

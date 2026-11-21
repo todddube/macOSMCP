@@ -53,6 +53,21 @@ how each replied, its alerts, and whether it shows as busy. Pass `include_detail
 for every event. `calendar_update_event` changes alerts, availability and how an event repeats;
 `reminders_update_reminder` changes how a reminder repeats.
 
+### Prompts
+
+Three ready-made requests, listed as slash commands in Claude Code
+(`/mcp__macbridge__daily-agenda`) and in Claude Desktop's attachment menu. Each tells the model
+which tools to call and how to lay out the answer; every argument is optional.
+
+| Prompt | Arguments | What you get |
+|---|---|---|
+| `daily-agenda` | `date` (default today) | the day's events and reminders in time order, gaps and overlaps called out |
+| `plan-my-week` | `start` (default today), `focus` | seven days of busy and free time, deadlines, and where things could fit |
+| `review-overdue` | `list` (default every list) | overdue reminders by list, each with "do, reschedule or drop" |
+
+Prompts only read until you answer. The changes they suggest go through the same Read-only and
+Ask before deleting settings as any other call, and none of them deletes anything.
+
 ## Install
 
 You don't need to build anything. Requires **macOS 14 or later**.
@@ -297,7 +312,8 @@ menu-bar icon never strands you. A launch splash shows the app's card and flies 
 the menu bar; it is skipped when a client starts the app, respects Reduce Motion, and can be
 turned off in Settings. The menu-bar icon is a template image when idle, so it follows the menu
 bar's colors, with status dots drawn into it; the panel scrolls on small screens, uses no text
-below 10 points, and shows Claude Desktop's two connections as one client with 2 sessions. Every tool has a readable title for client UIs; the three destructive tools tell
+below 10 points, and shows Claude Desktop's two connections as one client with 2 sessions. Three MCP prompts (`daily-agenda`, `plan-my-week`, `review-overdue`) show up as slash
+commands in Claude Code. Every tool has a readable title for client UIs; the three destructive tools tell
 Claude Code to always ask; and the read tools publish an output schema. Client names are now
 worked out by MacBridge from the process tree rather than taken on the client's word, and error
 details that could contain titles no longer reach the log. `find_available_times` caps its range
