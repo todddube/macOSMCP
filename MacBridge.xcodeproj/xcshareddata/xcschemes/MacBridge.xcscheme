@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "1430"
+   LastUpgradeVersion = "1600"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
+      buildArchitectures = "Automatic"
       runPostActionsOnFailure = "NO">
       <PostActions>
          <ExecutionAction
@@ -74,7 +75,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "MACBRIDGE_LIVE"
-            value = "[&quot;value&quot;: &quot;1&quot;, &quot;isEnabled&quot;: false]"
+            value = "[&quot;isEnabled&quot;: false, &quot;value&quot;: &quot;1&quot;]"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

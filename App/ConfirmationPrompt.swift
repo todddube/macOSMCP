@@ -17,7 +17,8 @@ import MacBridgeKit
 /// the main dispatch queue, so every other main-actor hop (all tool calls pass
 /// through the policy check there, as do the event stream and SwiftUI) would stall
 /// until the alert was answered. Instead the panel is shown and the caller awaits a
-/// continuation that the buttons, Escape or a timer resolve, exactly once.
+/// continuation that the buttons, Escape, a timer or the caller's cancellation
+/// resolve, exactly once.
 ///
 /// Alerts are shown one at a time, the rest queued in arrival order. The deadline
 /// is set when the call *arrives* (before it hops to the main actor or queues), so
@@ -33,6 +34,9 @@ enum ConfirmationPrompt {
         case approved
         case declined
         case timedOut
+        /// The calling task was cancelled: the client hung up, so nobody is waiting
+        /// for the answer and the alert closed unanswered.
+        case cancelled
     }
 
     /// Longest any one alert stays up.
@@ -45,6 +49,7 @@ enum ConfirmationPrompt {
     static let minimumShowTime: TimeInterval = 5
 
     /// One call waiting on, or showing, an alert. Resolved at most once.
+    @MainActor
     private final class Request {
         let client: ClientIdentity
         let tool: String
@@ -75,18 +80,30 @@ enum ConfirmationPrompt {
     ///     alert still asks without it.
     ///   - deadline: when the call stops waiting, fixed when the call arrived; the
     ///     alert closes then, and isn't shown at all if too little time remains.
+    ///
+    /// Cancelling the calling task (the bridge does when the client hangs up)
+    /// closes the alert, or drops it from the queue, with ``Outcome/cancelled``.
     static func ask(
         client: ClientIdentity, tool: String, target: String?, deadline: Date
     ) async -> Outcome {
+        guard !Task.isCancelled else { return .cancelled }
         guard deadline.timeIntervalSinceNow >= minimumShowTime else { return .timedOut }
         let request = Request(client: client, tool: tool, target: target, deadline: deadline)
-        return await withCheckedContinuation { continuation in
-            request.continuation = continuation
-            // Still queued when the deadline passes: give up without waiting for the
-            // alert ahead to finish.
-            addTimer(to: request, after: deadline.timeIntervalSinceNow) { complete(request, .timedOut) }
-            queue.append(request)
-            presentNext()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                request.continuation = continuation
+                // Still queued when the deadline passes: give up without waiting for the
+                // alert ahead to finish.
+                addTimer(to: request, after: deadline.timeIntervalSinceNow) { complete(request, .timedOut) }
+                queue.append(request)
+                presentNext()
+            }
+        } onCancel: {
+            // Runs on whichever thread cancelled. The hop is queued behind the code
+            // above, which runs to its suspension without yielding the main actor, so
+            // the continuation is always set by the time this arrives; a request
+            // already answered ignores it.
+            Task { @MainActor in complete(request, .cancelled) }
         }
     }
 

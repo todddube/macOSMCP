@@ -183,6 +183,9 @@ final class AppModel: ObservableObject {
             case .timedOut:
                 BridgeLog.info("\(tool) confirmation timed out", category: .tools)
                 return AccessPolicy.timedOut(tool)
+            case .cancelled:
+                BridgeLog.info("\(tool) confirmation closed — the client disconnected", category: .tools)
+                return AccessPolicy.clientGone(tool)
             }
         }
     }

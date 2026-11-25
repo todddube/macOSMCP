@@ -245,9 +245,12 @@ builds the older `AppIcon.icns` from the same bundle. Preview with Icon Composer
 `ictool App/AppIcon.icon --export-image ...` (in Xcode's `Icon Composer.app/Contents/Executables`). `BridgeRenderer` in
 `App/BridgeTraffic.swift` draws the menu-bar icon live, including the traffic animation.
 
-- **App icon:** a Mac mini under a suspension bridge: the machine on one side, the assistant on
-  the other, MacBridge as the span. At 16px it reduces to a blue tile, a pale slab and a bright
-  arc; the hangers, port and power light are fine detail that disappears cleanly at small sizes.
+- **App icon:** a suspension bridge at dusk over a Mac mini: the machine on one side, the
+  assistant on the other, MacBridge as the span. An indigo-to-coral sky, a low sun in the dip of
+  the cable, solid white towers and deck, and a current-model Mac mini. Shapes are solid and
+  strokes heavy so the glass, tinted and clear looks keep the silhouette. At 16px it reduces to
+  a warm tile, the white span with the sun behind it, and a pale block; the hangers, ports and
+  power light are fine detail that disappears cleanly at small sizes.
 - **Menu bar:** the same span in the menu bar's text colour, with calls crossing as coloured cars.
   A break in the deck means missing permissions or a stopped bridge. The two dots underneath are
   Claude Code (left) and Claude Desktop (right). Under Reduce Motion nothing animates.

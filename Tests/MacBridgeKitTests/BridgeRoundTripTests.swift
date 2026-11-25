@@ -12,7 +12,8 @@ import Testing
 
 @testable import MacBridgeKit
 
-/// Uses only `list` and `ping`, which never touch EventKit, so nothing prompts.
+/// Uses only `list`, `ping` and calls the test's authorizer refuses, none of which
+/// touch EventKit, so nothing prompts.
 ///
 /// Each test gets its own folder: the server sweeps stale sockets from the folder
 /// it listens in, and must not go near anyone else's.
@@ -117,6 +118,58 @@ struct BridgeRoundTripTests {
             #expect(await client.ping(), "the client should reach the restarted server")
             await client.disconnect()
         }
+    }
+
+    @Test("A client hanging up mid-call cancels the call's wait for the user")
+    func hangupCancelsPendingCall() async throws {
+        try await withSocketFolder { socket in
+            let cancelled = Counter()
+            let disconnects = Counter()
+            // Stands in for the confirmation prompt: waits until cancelled, or 30 s.
+            let server = BridgeServer(
+                registry: ToolRegistry(),
+                socketURL: socket,
+                authorize: { _, _ in
+                    try? await Task.sleep(for: .seconds(30))
+                    if Task.isCancelled { cancelled.increment() }
+                    return "declined"
+                },
+                observe: { event in
+                    if case .disconnected = event { disconnects.increment() }
+                }
+            )
+            try server.start()
+            defer { server.stop() }
+
+            let fd = try rawConnection(to: socket)
+            try SocketEndpoint.writeAll(fd, try BridgeCodec.line(BridgeHello(clientName: "test")))
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            _ = try SocketEndpoint.read(fd, into: &buffer)  // the welcome
+            let call = BridgeRequest(id: 1, op: .call, name: "reminders_delete_list", arguments: [:])
+            try SocketEndpoint.writeAll(fd, try BridgeCodec.line(call))
+            try await Task.sleep(for: .milliseconds(200))
+            close(fd)
+
+            let deadline = Date().addingTimeInterval(5)
+            while (cancelled.value == 0 || disconnects.value == 0) && Date() < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(cancelled.value == 1, "the pending call should be cancelled when its client hangs up")
+            #expect(disconnects.value == 1, "the hangup should be reported as a disconnect")
+        }
+    }
+
+    @Test("A pending call doesn't mistake a live, quiet client for a hangup")
+    func quietClientIsNotAHangup() throws {
+        var pair: [Int32] = [0, 0]
+        try #require(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
+        defer { close(pair[0]) }
+        #expect(!BridgeServer.peerHasHungUp(pair[0]))
+        // A request sent meanwhile is data, not a hangup, and stays unread.
+        _ = "x".withCString { Darwin.write(pair[1], $0, 1) }
+        #expect(!BridgeServer.peerHasHungUp(pair[0]))
+        close(pair[1])
+        #expect(BridgeServer.peerHasHungUp(pair[0]))
     }
 
     @Test("The socket folder is private to the user after start")

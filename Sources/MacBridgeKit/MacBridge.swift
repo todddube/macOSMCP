@@ -17,7 +17,7 @@ public enum MacBridge {
 
     /// The day `version` was cut, as YYYY-MM-DD. Bump it with `version`; `VersionTests`
     /// checks it against the newest entry in the README's version history.
-    public static let releaseDate = "2026-11-20"
+    public static let releaseDate = "2026-11-25"
 
     /// The release date for people, in their locale: "November 20, 2026".
     /// Read and written in UTC, so no time zone moves it to another day. Falls back

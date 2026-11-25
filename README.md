@@ -1,10 +1,12 @@
+<img src="docs/images/icon.png" width="128" align="right" alt="MacBridge app icon">
+
 # MacBridge
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg)
 ![Swift](https://img.shields.io/badge/Swift-6-orange.svg)
 
-**v1.9.0** (2026-11-20) — a free, open-source macOS **menu-bar app and MCP server** that gives Claude Code and Claude Desktop read
+**v1.9.0** (2026-11-25) — a free, open-source macOS **menu-bar app and MCP server** that gives Claude Code and Claude Desktop read
 and write access to your **Calendar** and **Reminders**, through EventKit, entirely on your Mac.
 
 Swift package + Xcode app. No Python, no Node, and no network use except **Check for Updates…**,
@@ -23,6 +25,27 @@ when you click it. Requires macOS 14+. Free to use, modify and share under the
                     ├─ ActivityLog       what the menu bar shows
                     └─ MacBridgeKit      EventKit lives here; TCC is granted once, to the app
 ```
+
+<img src="docs/images/panel.png" width="380" align="right" alt="The MacBridge menu-bar panel: permissions granted, Claude Desktop connected, and the activity bridge">
+
+**What it's for:** ask Claude *"what's on my calendar tomorrow?"*, *"move my 3pm to Friday"*,
+*"remind me to call the dentist on Monday at 9"* or *"what's overdue?"*, and it reads and writes
+the same Calendar and Reminders you use on your Mac, iPhone and iPad (anything synced through
+iCloud, Google, Exchange or other accounts set up in Calendar shows up too).
+
+**Privacy and safety:**
+- MacBridge talks to EventKit on your Mac and to nothing else. It makes no network connections
+  except **Check for Updates…** when you click it, and has no analytics. Your AI client does send
+  what it reads to its own service, as it does with anything else you share with it.
+- Calendar and Reminders access is granted once, to the app, through macOS's own permission
+  prompts, and can be revoked in System Settings › Privacy & Security.
+- **Ask before deleting** (on by default) shows a prompt you must approve before any event,
+  reminder or list is deleted. **Read-only** blocks every change.
+- Only your user account can reach the bridge, and the app checks which program is calling
+  rather than trusting what the client says about itself.
+- Signed with a Developer ID and notarized by Apple. MIT-licensed; every line is here to read.
+
+<br clear="right">
 
 ## Tools
 
@@ -229,7 +252,18 @@ claude mcp add --scope user macbridge -- /Applications/MacBridge.app/Contents/Ma
     "command": "/Applications/MacBridge.app/Contents/MacOS/macbridge", "args": ["mcp"] } } }
 ```
 
-Or click **Connect** in the menu-bar panel, which does this for you. This repo's `.mcp.json` already points at
+**Cursor** (`~/.cursor/mcp.json`) and **Windsurf** (`~/.codeium/windsurf/mcp_config.json`) use
+the same `mcpServers` block as Claude Desktop. **VS Code** (**MCP: Open User Configuration**):
+
+```json
+{ "servers": { "macbridge": { "type": "stdio",
+    "command": "/Applications/MacBridge.app/Contents/MacOS/macbridge", "args": ["mcp"] } } }
+```
+
+Any other MCP client that runs a local stdio server works the same way: the command is
+`/Applications/MacBridge.app/Contents/MacOS/macbridge` with the argument `mcp`.
+
+For Claude Code and Claude Desktop you can instead click **Connect** in the menu-bar panel, which does this for you. This repo's `.mcp.json` already points at
 that path, so Claude Code picks it up when you open the project here.
 
 You do not need to start the app first: if a client spawns the shim while the app is closed, the
@@ -276,8 +310,6 @@ command-line tool's access to the app that launched it. The menu-bar panel shows
 
 - **Per-client consent.** Read-only and Ask before deleting apply to every client alike. Allowing or
   blocking one client, or limiting clients to some calendars and lists, isn't built yet.
-- **First notarized release.** `make release` and `make publish` are ready, but haven't run yet: they
-  need the Developer ID certificate and notary credentials set up.
 - **Automatic updates.** **Check for Updates…** (right-click menu, or About) says whether a newer
   release is out and opens its page; installing it is still a download. MacBridge never checks on
   its own.
@@ -324,10 +356,10 @@ and distribute, with no warranty. Every source file carries the copyright notice
 
 ## Version history
 
-**1.9.0** · 2026-11-20 — macOS 26/27 polish, safer confirmations, and richer tool metadata.
+**1.9.0** · 2026-11-25 — macOS 26/27 polish, safer confirmations, and richer tool metadata.
 Requires macOS 14 or later. The delete confirmation now floats above whatever app you're in
-without taking the keyboard, has no default button (Escape cancels), and counts down to its
-deadline; while it waits, other tool calls keep working, and a second request queues behind it
+without taking the keyboard, has no default button (Escape cancels), counts down to its
+deadline, and closes by itself if the client that asked quits; while it waits, other tool calls keep working, and a second request queues behind it
 with its own deadline. A new **Settings** window (⌘, or **Settings…**) with toolbar tabs holds
 Safety, General and Diagnostics, and opens when you open MacBridge from Finder, so hiding the
 menu-bar icon never strands you. A launch splash shows the app's card and flies its icon into
@@ -341,8 +373,9 @@ commands in Claude Code, and four resources (`macbridge://agenda/today`, `…/ag
 Claude Code to always ask; and the read tools publish an output schema. Client names are now
 worked out by MacBridge from the process tree rather than taken on the client's word, and error
 details that could contain titles no longer reach the log. `find_available_times` caps its range
-like search does, and a non-text `due` is refused instead of clearing the date. The app icon is a
-layered Icon Composer icon that adapts to dark, tinted and clear appearances. About and
+like search does, and a non-text `due` is refused instead of clearing the date. The app icon is
+redrawn as a bridge at dusk (an indigo-to-coral sky, a low sun behind the span, a current Mac
+mini), as a layered Icon Composer icon that adapts to dark, tinted and clear appearances. About and
 `macbridge --version` show the release date. The menu-bar animation is far lighter: one call used to keep the app at
 about 44% CPU for 11 seconds, and now costs about a second (a call every 3 seconds averages
 about 5%; idle is 0%), because the icon animates real calls only, at 10 fps, and the panel no

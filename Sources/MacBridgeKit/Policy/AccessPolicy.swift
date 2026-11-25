@@ -85,6 +85,12 @@ public struct AccessPolicy: Equatable, Sendable {
         """
     }
 
+    /// The client hung up while the confirmation was waiting. Nobody reads this
+    /// reply; it is what the activity list shows for the call.
+    public static func clientGone(_ tool: String) -> String {
+        "The client disconnected before \(tool) was confirmed, so it was not run and nothing was changed."
+    }
+
     /// The app couldn't apply the policy at all; refuse rather than allow.
     public static let unavailable =
         "MacBridge couldn't check whether this call is allowed, so it was not run and nothing was changed."

@@ -21,7 +21,8 @@ public final class BridgeServer: @unchecked Sendable {
     /// Asked to approve each call before it runs, returning a refusal message or
     /// nil to allow. The app applies its ``AccessPolicy`` here (Read-only, and the
     /// confirmation before deleting), so the server itself never has to learn
-    /// about policy. It may take as long as a person takes to answer.
+    /// about policy. It may take as long as a person takes to answer, and is
+    /// cancelled if the client hangs up meanwhile, so a long wait should end then.
     public typealias Authorizer = @Sendable (BridgeRequest, ClientIdentity) async -> String?
 
     /// Called on connect, disconnect and each completed call, for the menu bar.
@@ -309,6 +310,8 @@ public final class BridgeServer: @unchecked Sendable {
             }
         } catch let error as SocketEndpoint.SocketError where identity == nil && BridgeClient.isTimeout(error) {
             BridgeLog.info("closed a connection that sent no handshake", category: .bridge)
+        } catch is PeerHungUp {
+            // Already logged; reported below as an ordinary disconnect.
         } catch {
             if let identity {
                 observe(.call(identity, tool: "(connection)", ok: false, detail: error.localizedDescription))
@@ -416,7 +419,7 @@ public final class BridgeServer: @unchecked Sendable {
         let semaphore = DispatchSemaphore(value: 0)
         var response = BridgeResponse.failure(id: request.id, "No response produced.")
 
-        Task { [registry, authorize, observe] in
+        let task = Task { [registry, authorize, observe] in
             defer { semaphore.signal() }
 
             switch request.op {
@@ -465,7 +468,46 @@ public final class BridgeServer: @unchecked Sendable {
             }
         }
 
-        semaphore.wait()
+        // A call can wait a long time on the user (the delete confirmation), and
+        // nothing reads the socket meanwhile, so a client that quit would leave its
+        // prompt up and still approvable. Check for the hangup while waiting and
+        // cancel the call's task; the confirmation closes on cancellation.
+        while semaphore.wait(timeout: .now() + Self.hangupCheckInterval) == .timedOut {
+            guard Self.peerHasHungUp(fd) else { continue }
+            BridgeLog.info(
+                "\(request.name ?? request.op.rawValue) abandoned — \(identity.displayName) disconnected",
+                category: .bridge
+            )
+            task.cancel()
+            semaphore.wait()
+            throw PeerHungUp()
+        }
         try SocketEndpoint.writeAll(fd, try BridgeCodec.line(response))
+    }
+
+    /// How often a pending call checks whether its client is still there.
+    private static let hangupCheckInterval: DispatchTimeInterval = .milliseconds(500)
+
+    /// Thrown when a client closed its connection while a call was pending; ends
+    /// the connection as an ordinary disconnect rather than a failed call.
+    private struct PeerHungUp: Error {}
+
+    /// Whether the client at the other end of `fd` has closed its connection.
+    ///
+    /// Peeks rather than reads, so a request already sent is left for the read
+    /// loop. The shim sends one request at a time, so while a call is pending,
+    /// end-of-stream is the only thing expected here. Darwin sets `POLLHUP` once the
+    /// peer's write side is shut, even with unread data queued, so data followed by
+    /// a close still counts; so does a half-close (`shutdown(SHUT_WR)`). The socket
+    /// therefore needs a full-duplex client: a script that half-closes after its
+    /// request loses the reply to any call slower than ``hangupCheckInterval``.
+    static func peerHasHungUp(_ fd: Int32) -> Bool {
+        var descriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        guard poll(&descriptor, 1, 0) > 0 else { return false }
+        if descriptor.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 { return true }
+        var byte: UInt8 = 0
+        let peeked = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+        if peeked == 0 { return true }
+        return peeked < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR
     }
 }
